@@ -30,6 +30,7 @@ section { margin-top: 28px; }
 .legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 13px; color: var(--muted); margin-bottom: 8px; }
 .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
 .mapbar { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; font-size: 13px; color: var(--muted); flex-wrap: wrap; }
+.mapbar .seg { display: inline-flex; margin: 0 6px; } .mapbar .seg button { border-radius: 0; } .mapbar .seg button:first-child { border-radius: 6px 0 0 6px; } .mapbar .seg button:last-child { border-radius: 0 6px 6px 0; margin-left: -1px; } .mapbar button.on { background: var(--accent); color: var(--panel); border-color: var(--accent); }
 .mapbar button { font: 13px var(--sans); border: 1px solid var(--line); background: var(--panel); color: var(--ink); border-radius: 6px; padding: 3px 10px; cursor: pointer; }
 .mapwrap { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; overflow: auto; max-height: 78vh; }
 #map { display: block; }
@@ -85,14 +86,15 @@ input[type=search] { font: 14px var(--sans); padding: 7px 12px; border: 1px soli
     <div class="stats" id="stats"></div>
   </header>
   <section>
-    <h2>How the folders depend on each other</h2>
+    <h2 id="maptitle">How the folders depend on each other</h2>
     <div class="legend" id="legend"></div>
     <div class="mapbar">
       <button id="zout" aria-label="Zoom out">−</button><button id="zin" aria-label="Zoom in">+</button><button id="zfit">Fit</button>
+      <span class="seg"><button data-mode="pkg">Packages</button><button data-mode="dir">Folders</button></span>
       <span>Bottom rows are foundations; each row only imports rows below it. <span style="color:var(--cyc)">Red dashed</span> = import cycle.</span>
     </div>
     <div class="mapwrap" id="wrap"><svg id="map" role="img" aria-label="Folder dependency map"></svg></div>
-    <p class="hint" id="hint">Click a folder to see <span class="o">what it imports</span> and <span class="i">what imports it</span>.</p>
+    <p class="hint" id="hint">Click a box to see <span class="o">what it imports</span> and <span class="i">what imports it</span>.</p>
   </section>
   <section>
     <h2>Files and functions</h2>
@@ -129,122 +131,134 @@ const topOf = p => p === "." ? "." : p.split("/")[0];
 const tops = {};
 for (const p of P) (tops[topOf(p.path)] ||= []).push(p.path);
 const order = Object.entries(tops).sort((a, b) => b[1].length - a[1].length).map(e => e[0]);
-const cidx = t => Math.min(order.indexOf(t), 7);
+const cidx = t => Math.max(0, Math.min(order.indexOf(t), 7));
 const color = p => `var(--c${cidx(topOf(p))})`;
 $("legend").innerHTML = order.slice(0, 7).map((t, i) => `<span><i style="background:var(--c${i})"></i>${esc(t === "." ? "(root)" : t + "/")}</span>`).join("") +
   (order.length > 7 ? `<span><i style="background:var(--c7)"></i>${order.length - 7} more</span>` : "");
 
-// ---- strongly connected components (import cycles), Tarjan
-const sccOf = {}, sccs = [];
-{ let idx = 0; const st = [], on = new Set(), I = {}, L = {};
-  const go = v => { I[v] = L[v] = idx++; st.push(v); on.add(v);
-    for (const w of byPath[v].imports) { if (!byPath[w]) continue;
-      if (I[w] === undefined) { go(w); L[v] = Math.min(L[v], L[w]); } else if (on.has(w)) L[v] = Math.min(L[v], I[w]); }
-    if (L[v] === I[v]) { const c = []; let w; do { w = st.pop(); on.delete(w); sccOf[w] = sccs.length; c.push(w); } while (w !== v); sccs.push(c); } };
-  for (const p of P) if (I[p.path] === undefined) go(p.path); }
-const cyclic = sccs.filter(c => c.length > 1);
-const inCycle = (a, b) => sccOf[a] === sccOf[b] && sccs[sccOf[a]].length > 1;
-
-const tf = ALLF.length, tfn = P.reduce((a, p) => a + p.nfn, 0);
-$("stats").innerHTML = [[K.length, "packages"], [P.length, "folders"], [tf, "files"], [tfn, "functions"], [D.lines, "lines"]]
-  .map(([n, l]) => `<div><b>${num(n)}</b> <span>${l}</span></div>`).join("") +
-  `<div class="${cyclic.length ? "bad" : ""}"><b>${cyclic.length}</b> <span>import cycles${cyclic.length ? " (" + cyclic.reduce((a, c) => a + c.length, 0) + " folders)" : ""}</span></div>`;
-
-// ---- layers: an SCC sits one row above the highest SCC it imports
-const sl = [];
-const sdepth = s => {
-  if (sl[s] !== undefined) return sl[s];
-  sl[s] = 0;
-  let m = -1;
-  for (const v of sccs[s]) for (const w of byPath[v].imports) if (byPath[w] && sccOf[w] !== s) m = Math.max(m, sdepth(sccOf[w]));
-  return (sl[s] = m + 1);
+// ---- the map can draw packages or folders; both become {path, imports, usedBy, weights, nfn, nfiles, lines, ck}
+const GRAPHS = {
+  pkg: K.map(k => ({path: k.name, imports: k.imports, usedBy: k.usedBy, weights: k.weights, nfn: k.nfn, nfiles: k.files.length, lines: k.lines, ck: k.dir, sub: k.dir})),
+  dir: P.map(p => ({...p, ck: p.path})),
 };
-const layer = {};
-for (const p of P) layer[p.path] = sdepth(sccOf[p.path]);
-const nL = Math.max(...Object.values(layer)) + 1;
-const W = p => Math.max(60, 18 + Math.min(p.length, 34) * 7.3) + Math.min(50, byPath[p].nfn / 3);
-const label = p => p.length > 34 ? "…" + p.slice(-33) : p;
-const BOXH = 28, LINEH = 50, BANDGAP = 34, PADX = 90, GAP = 12, MAXW = Math.max(1100, Math.min(2400, Math.sqrt(P.length) * 260));
-const pos = {};
-
-// order each layer by barycentre of neighbours already placed; a few sweeps
-const rows = Array.from({length: nL}, () => []);
-for (const p of P) rows[layer[p.path]].push(p.path);
-rows.forEach(r => r.sort());
-const place = () => {
-  let y = 20; const bands = [];
-  for (let i = nL - 1; i >= 0; i--) {
-    const lines = [[]]; let x = PADX;
-    for (const p of rows[i]) { const w = W(p); if (x + w > MAXW && lines.at(-1).length) { lines.push([]); x = PADX; } lines.at(-1).push(p); x += w + GAP; }
-    const y0 = y;
-    for (const ln of lines) {
-      const tw = ln.reduce((a, p) => a + W(p), 0) + GAP * (ln.length - 1);
-      let x = PADX + Math.max(0, (MAXW - PADX - tw) / 2);
-      for (const p of ln) { const w = W(p); pos[p] = {x, y, w, cx: x + w / 2}; x += w + GAP; }
-      y += LINEH;
-    }
-    bands.push({i, y0, y1: y - LINEH + BOXH}); y += BANDGAP;
-  }
-  return {bands, height: y - BANDGAP + 20};
-};
-let lay = place();
-for (let pass = 0; pass < 4; pass++) {
-  const bary = p => { const n = [...byPath[p].imports, ...byPath[p].usedBy].filter(x => pos[x]); return n.length ? n.reduce((a, x) => a + pos[x].cx, 0) / n.length : pos[p].cx; };
-  for (const r of rows) { const b = Object.fromEntries(r.map(p => [p, bary(p)])); r.sort((a, c) => b[a] - b[c]); }
-  lay = place();
-}
-const width = MAXW + 20, height = lay.height;
+const NOUN = {pkg: "packages", dir: "folders"};
+let mode = K.length > 1 ? "pkg" : "dir", G = [], byId = {}, sccOf = {}, sccs = [], width = 0, height = 0;
 const svg = $("map");
-svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
-let bg = "", edges = "", nodes = "";
-for (const b of lay.bands) {
-  bg += `<rect class="bandbg" x="0" y="${b.y0 - 10}" width="${width}" height="${b.y1 - b.y0 + 20}"/>` +
+
+function drawMap(m) {
+  mode = m; G = GRAPHS[m]; byId = Object.fromEntries(G.map(n => [n.path, n]));
+  document.querySelectorAll("[data-mode]").forEach(b => b.classList.toggle("on", b.dataset.mode === m));
+  $("maptitle").textContent = `How the ${NOUN[m]} depend on each other`;
+
+  // strongly connected components (import cycles), Tarjan
+  sccOf = {}; sccs = [];
+  { let idx = 0; const st = [], on = new Set(), I = {}, L = {};
+    const go = v => { I[v] = L[v] = idx++; st.push(v); on.add(v);
+      for (const w of byId[v].imports) { if (!byId[w]) continue;
+        if (I[w] === undefined) { go(w); L[v] = Math.min(L[v], L[w]); } else if (on.has(w)) L[v] = Math.min(L[v], I[w]); }
+      if (L[v] === I[v]) { const c = []; let w; do { w = st.pop(); on.delete(w); sccOf[w] = sccs.length; c.push(w); } while (w !== v); sccs.push(c); } };
+    for (const n of G) if (I[n.path] === undefined) go(n.path); }
+  const cyclic = sccs.filter(c => c.length > 1);
+  const inCycle = (a, b) => sccOf[a] === sccOf[b] && sccs[sccOf[a]].length > 1;
+  $("stats").innerHTML = [[K.length, "packages"], [P.length, "folders"], [ALLF.length, "files"], [ALLF.reduce((a, f) => a + f.funcs.length, 0), "functions"], [D.lines, "lines"]]
+    .map(([n, l]) => `<div><b>${num(n)}</b> <span>${l}</span></div>`).join("") +
+    `<div class="${cyclic.length ? "bad" : ""}"><b>${cyclic.length}</b> <span>import cycles between ${NOUN[m]}${cyclic.length ? " (" + cyclic.reduce((a, c) => a + c.length, 0) + " involved)" : ""}</span></div>`;
+
+  // layers: an SCC sits one row above the highest SCC it imports
+  const sl = [];
+  const sdepth = s => {
+    if (sl[s] !== undefined) return sl[s];
+    sl[s] = 0; let mx = -1;
+    for (const v of sccs[s]) for (const w of byId[v].imports) if (byId[w] && sccOf[w] !== s) mx = Math.max(mx, sdepth(sccOf[w]));
+    return (sl[s] = mx + 1);
+  };
+  const layer = {};
+  for (const n of G) layer[n.path] = sdepth(sccOf[n.path]);
+  const nL = Math.max(...Object.values(layer)) + 1;
+  const W = p => Math.max(60, 18 + Math.min(p.length, 34) * 7.3) + Math.min(50, byId[p].nfn / 3);
+  const label = p => p.length > 34 ? "…" + p.slice(-33) : p;
+  const BOXH = 28, LINEH = 50, BANDGAP = 34, PADX = 90, GAP = 12;
+  const pos = {};
+  const rows = Array.from({length: nL}, () => []);
+  for (const n of G) rows[layer[n.path]].push(n.path);
+  // canvas as wide as the widest row needs, capped so big graphs wrap rows instead
+  const widest = Math.max(...rows.map(r => r.reduce((a, p) => a + W(p) + GAP, 0)));
+  const MAXW = Math.min(Math.max(1100, Math.min(2400, Math.sqrt(G.length) * 260)), Math.max(480, PADX * 2 + widest));
+  rows.forEach(r => r.sort());
+  const place = () => {
+    let y = 20; const bands = [];
+    for (let i = nL - 1; i >= 0; i--) {
+      const lines = [[]]; let x = PADX;
+      for (const p of rows[i]) { const w = W(p); if (x + w > MAXW && lines.at(-1).length) { lines.push([]); x = PADX; } lines.at(-1).push(p); x += w + GAP; }
+      const y0 = y;
+      for (const ln of lines) {
+        const tw = ln.reduce((a, p) => a + W(p), 0) + GAP * (ln.length - 1);
+        let x = PADX + Math.max(0, (MAXW - PADX - tw) / 2);
+        for (const p of ln) { const w = W(p); pos[p] = {x, y, w, cx: x + w / 2}; x += w + GAP; }
+        y += LINEH;
+      }
+      bands.push({i, y0, y1: y - LINEH + BOXH}); y += BANDGAP;
+    }
+    return {bands, height: y - BANDGAP + 20};
+  };
+  // order each layer by barycentre of its neighbours; a few sweeps
+  let lay = place();
+  for (let pass = 0; pass < 4; pass++) {
+    const bary = p => { const n = [...byId[p].imports, ...byId[p].usedBy].filter(x => pos[x]); return n.length ? n.reduce((a, x) => a + pos[x].cx, 0) / n.length : pos[p].cx; };
+    for (const r of rows) { const b = Object.fromEntries(r.map(p => [p, bary(p)])); r.sort((a, c) => b[a] - b[c]); }
+    lay = place();
+  }
+  width = MAXW + 20; height = lay.height;
+  svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+  let bg = "", edges = "", nodes = "";
+  for (const b of lay.bands) bg += `<rect class="bandbg" x="0" y="${b.y0 - 10}" width="${width}" height="${b.y1 - b.y0 + 20}"/>` +
     `<text class="band" x="10" y="${b.y0 + 5}">${b.i === 0 ? "foundation" : "layer " + b.i}</text>`;
+  for (const n of G) for (const t of n.imports) {
+    const a = pos[n.path], b = pos[t]; if (!b) continue;
+    let d;
+    if (a.y === b.y) { const ry = a.y - 18 - Math.min(40, Math.abs(a.cx - b.cx) / 6); d = `M${a.cx},${a.y} C${a.cx},${ry} ${b.cx},${ry} ${b.cx},${b.y}`; }
+    else if (b.y > a.y) { const y1 = a.y + BOXH, my = (y1 + b.y) / 2; d = `M${a.cx},${y1} C${a.cx},${my} ${b.cx},${my} ${b.cx},${b.y}`; }
+    else { const y2 = b.y + BOXH, my = (a.y + y2) / 2; d = `M${a.cx},${a.y} C${a.cx},${my} ${b.cx},${my} ${b.cx},${y2}`; }
+    edges += `<path class="edge${inCycle(n.path, t) ? " cyc" : ""}" data-f="${esc(n.path)}" data-t="${esc(t)}" d="${d}"><title>${esc(n.path)} → ${esc(t)} (${n.weights[t] || 1} imports)</title></path>`;
+  }
+  for (const n of G) {
+    const q = pos[n.path], c = color(n.ck);
+    nodes += `<g class="node" tabindex="0" role="button" data-p="${esc(n.path)}">
+      <rect class="box" x="${q.x}" y="${q.y}" width="${q.w}" height="${BOXH}" rx="6" style="stroke:${c}"/>
+      <rect x="${q.x}" y="${q.y}" width="5" height="${BOXH}" rx="2" style="fill:${c}"/>
+      <text x="${q.cx + 2}" y="${q.y + 18}" text-anchor="middle">${esc(label(n.path))}</text>
+      <title>${esc(n.path)}${n.sub ? " (" + esc(n.sub) + ")" : ""}\n${n.nfiles} files · ${n.nfn} functions · ${num(n.lines)} lines\nimports ${n.imports.length} · imported by ${n.usedBy.length}</title></g>`;
+  }
+  svg.innerHTML = bg + `<g>${edges}</g><g>${nodes}</g>`;
+  setZoom(Math.max(fit(), .55));
 }
-for (const p of P) for (const t of p.imports) {
-  const a = pos[p.path], b = pos[t]; if (!b) continue;
-  const cyc = inCycle(p.path, t);
-  let d;
-  if (a.y === b.y) { const ry = a.y - 18 - Math.min(40, Math.abs(a.cx - b.cx) / 6); d = `M${a.cx},${a.y} C${a.cx},${ry} ${b.cx},${ry} ${b.cx},${b.y}`; }
-  else if (b.y > a.y) { const y1 = a.y + BOXH, my = (y1 + b.y) / 2; d = `M${a.cx},${y1} C${a.cx},${my} ${b.cx},${my} ${b.cx},${b.y}`; }
-  else { const y2 = b.y + BOXH, my = (a.y + y2) / 2; d = `M${a.cx},${a.y} C${a.cx},${my} ${b.cx},${my} ${b.cx},${y2}`; }
-  edges += `<path class="edge${cyc ? " cyc" : ""}" data-f="${esc(p.path)}" data-t="${esc(t)}" d="${d}"><title>${esc(p.path)} → ${esc(t)} (${p.weights[t] || 1} imports)</title></path>`;
-}
-for (const p of P) {
-  const q = pos[p.path];
-  nodes += `<g class="node" tabindex="0" role="button" data-p="${esc(p.path)}">
-    <rect class="box" x="${q.x}" y="${q.y}" width="${q.w}" height="${BOXH}" rx="6" style="stroke:${color(p.path)}"/>
-    <rect x="${q.x}" y="${q.y}" width="5" height="${BOXH}" rx="2" style="fill:${color(p.path)}"/>
-    <text x="${q.cx + 2}" y="${q.y + 18}" text-anchor="middle">${esc(label(p.path))}</text>
-    <title>${esc(p.path)}\n${p.nfiles} files · ${p.nfn} functions · ${num(p.lines)} lines\nimports ${p.imports.length} · imported by ${p.usedBy.length}</title></g>`;
-}
-svg.innerHTML = bg + `<g>${edges}</g><g>${nodes}</g>`;
 
 // zoom
 let zoom = 1;
 const fit = () => Math.min(1, ($("wrap").clientWidth - 2) / width);
 const setZoom = z => { zoom = Math.max(.2, Math.min(3, z)); svg.style.width = width * zoom + "px"; svg.style.height = height * zoom + "px"; };
 $("zin").onclick = () => setZoom(zoom * 1.25); $("zout").onclick = () => setZoom(zoom / 1.25); $("zfit").onclick = () => setZoom(fit());
-setZoom(Math.max(fit(), .55));
 
-// highlight one folder, or (for a package) the set of folders it spans
-function highlight(p, set) {
-  set ||= p ? new Set([p]) : new Set();
+// highlight a set of map nodes and the lines in and out of it
+function highlight(set, title) {
   const near = new Set(set);
-  for (const x of set) for (const y of [...byPath[x].imports, ...byPath[x].usedBy]) near.add(y);
+  for (const x of set) for (const y of [...(byId[x]?.imports || []), ...(byId[x]?.usedBy || [])]) near.add(y);
   svg.querySelectorAll(".node").forEach(n => { n.classList.toggle("on", set.has(n.dataset.p)); n.classList.toggle("dim", set.size > 0 && !near.has(n.dataset.p)); });
   svg.querySelectorAll(".edge").forEach(e => {
     const o = set.has(e.dataset.f) && !set.has(e.dataset.t), i = set.has(e.dataset.t) && !set.has(e.dataset.f), inner = set.has(e.dataset.f) && set.has(e.dataset.t);
     e.classList.toggle("out", o); e.classList.toggle("in", i); e.classList.toggle("dim", set.size > 0 && !o && !i && !inner);
   });
-  if (p) {
-    const k = byPath[p], cyc = sccs[sccOf[p]].length > 1;
-    $("hint").innerHTML = `<b>${esc(p)}</b> <span class="o">imports ${k.imports.length}</span> and <span class="i">is imported by ${k.usedBy.length}</span> folders` +
-      (cyc ? ` · <span class="c">in a cycle with ${sccs[sccOf[p]].length - 1} other folder(s)</span>` : "") + ".";
-  }
+  if (set.size === 1) {
+    const p = [...set][0], k = byId[p], cyc = sccs[sccOf[p]].length > 1, noun = NOUN[mode];
+    $("hint").innerHTML = `<b>${esc(p)}</b> <span class="o">imports ${k.imports.length}</span> and <span class="i">is imported by ${k.usedBy.length}</span> ${noun}` +
+      (cyc ? ` · <span class="c">in a cycle with ${sccs[sccOf[p]].length - 1} other ${noun.slice(0, -1)}(s)</span>` : "") + ".";
+  } else if (title) $("hint").innerHTML = title;
+  const first = svg.querySelector(".node.on");
+  first?.scrollIntoView({block: "nearest", inline: "center", behavior: "smooth"});
 }
-svg.addEventListener("click", e => { const n = e.target.closest(".node"); if (n) selectDir(n.dataset.p, true); });
-svg.addEventListener("keydown", e => { const n = e.target.closest(".node"); if (n && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); selectDir(n.dataset.p, true); } });
+svg.addEventListener("click", e => { const n = e.target.closest(".node"); if (n) mode === "pkg" ? selectPkg(n.dataset.p) : selectDir(n.dataset.p); });
+svg.addEventListener("keydown", e => { const n = e.target.closest(".node"); if (n && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); n.dispatchEvent(new MouseEvent("click", {bubbles: true})); } });
+document.querySelectorAll("[data-mode]").forEach(b => b.onclick = () => { drawMap(b.dataset.mode); sel.pkg ? selectPkg(sel.pkg) : selectDir(sel.dir); });
 
 // ---- browser: packages → files (modules) of the package → functions
 // sel is {pkg: name} from the list, or {dir: folder} from a click on the map
@@ -306,12 +320,13 @@ const renderAll = () => { renderPkgs(); renderFiles(); renderFns(); $("files").s
 function selectPkg(name) {
   sel = {pkg: name}; curFile = ""; renderAll();
   const k = byName[name];
-  highlight(null, k.dirs);
-  $("hint").innerHTML = `Package <b>${esc(name)}</b> spans ${k.dirs.size} folder(s) on the map; <span class="o">orange</span> lines leave it, <span class="i">blue</span> lines come in.`;
+  if (mode === "pkg") highlight(new Set([name]));
+  else highlight(k.dirs, `Package <b>${esc(name)}</b> spans ${k.dirs.size} folder(s); <span class="o">orange</span> lines leave it, <span class="i">blue</span> lines come in.`);
 }
-function selectDir(p, fromMap) {
-  sel = {dir: p}; curFile = ""; renderAll(); highlight(p);
-  if (!fromMap) svg.querySelector(`.node[data-p="${CSS.escape(p)}"]`)?.scrollIntoView({block: "nearest", inline: "center", behavior: "smooth"});
+function selectDir(p) {
+  sel = {dir: p}; curFile = ""; renderAll();
+  if (mode === "dir") highlight(new Set([p]));
+  else highlight(new Set(K.filter(k => k.dirs.has(p)).map(k => k.name)), `Folder <b>${esc(p)}</b> is in the highlighted package.`);
 }
 $("pkgs").addEventListener("click", e => { const b = e.target.closest("[data-pkg]"); if (b) selectPkg(b.dataset.pkg); });
 $("files").addEventListener("click", e => {
@@ -322,6 +337,7 @@ $("files").addEventListener("click", e => {
 $("q").addEventListener("input", e => { query = e.target.value.trim().toLowerCase(); renderFns(); });
 $("exported").addEventListener("change", e => { expOnly = e.target.checked; renderFns(); });
 $("foot").textContent = `${D.rev ? "Commit " + D.rev + ". " : ""}Packages are folders with a package.json or project.json (Nx). Bold = exported. Type-only imports and tests are left out. “open” jumps to the line in VS Code${D.source ? "; “github” opens it on GitHub" : ""}.`;
+drawMap(mode);
 selectPkg(sel.pkg);
 </script>
 </body>
