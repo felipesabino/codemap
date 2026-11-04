@@ -124,7 +124,7 @@ for (const k of K) {
   for (const f of k.files) f.pk = k.name;
 }
 const ALLF = K.flatMap(k => k.files);
-$("root").textContent = D.root + (D.depth ? `  ·  grouped to depth ${D.depth}` : "");
+$("root").textContent = D.label + (D.depth ? `  ·  grouped to depth ${D.depth}` : "");
 
 // ---- colour by top-level folder
 const topOf = p => p === "." ? "." : p.split("/")[0];
@@ -229,13 +229,21 @@ function drawMap(m) {
       <text x="${q.cx + 2}" y="${q.y + 18}" text-anchor="middle">${esc(label(n.path))}</text>
       <title>${esc(n.path)}${n.sub ? " (" + esc(n.sub) + ")" : ""}\n${n.nfiles} files · ${n.nfn} functions · ${num(n.lines)} lines\nimports ${n.imports.length} · imported by ${n.usedBy.length}</title></g>`;
   }
-  svg.innerHTML = bg + `<g>${edges}</g><g>${nodes}</g>`;
-  setZoom(Math.max(fit(), .55));
+  svg.innerHTML = bg + `<g id="content"><g>${edges}</g><g>${nodes}</g></g>`;
+  // size the canvas to what was actually drawn: same-row cycle arcs bulge above their row
+  const bb = $("content").getBBox(), M = 12;
+  const x0 = Math.min(0, bb.x - M), y0 = Math.min(0, bb.y - M);
+  width = Math.max(width, bb.x + bb.width + M) - x0; height = Math.max(height, bb.y + bb.height + M) - y0;
+  svg.setAttribute("viewBox", `${x0} ${y0} ${width} ${height}`);
+  svg.querySelectorAll(".bandbg").forEach(r => { r.setAttribute("x", x0); r.setAttribute("width", width); });
+  setZoom(Math.max(fitW(), .55));
 }
 
 // zoom
 let zoom = 1;
-const fit = () => Math.min(1, ($("wrap").clientWidth - 2) / width);
+// Fit = whole map visible: limited by the panel's width and by its max height (78vh)
+const fitW = () => Math.min(1, ($("wrap").clientWidth - 2) / width);
+const fit = () => Math.min(fitW(), (innerHeight * .78 - 2) / height);
 const setZoom = z => { zoom = Math.max(.2, Math.min(3, z)); svg.style.width = width * zoom + "px"; svg.style.height = height * zoom + "px"; };
 $("zin").onclick = () => setZoom(zoom * 1.25); $("zout").onclick = () => setZoom(zoom / 1.25); $("zfit").onclick = () => setZoom(fit());
 
@@ -267,7 +275,7 @@ const maxLen = Math.min(200, Math.max(1, ...ALLF.flatMap(f => f.funcs.map(x => x
 const pkgColor = k => color(k.dir === "." ? "." : k.dir);
 const link = (file, line) => {
   const gh = D.source ? `<a href="${esc(D.source + file.rel)}#L${line}" target="_blank" rel="noopener">github</a> · ` : "";
-  return gh + `<a href="vscode://file${esc(encodeURI(D.root + "/" + file.rel))}:${line}">open</a>`;
+  return D.local ? gh + `<a href="vscode://file${esc(encodeURI(D.root + "/" + file.rel))}:${line}">open</a>` : gh.replace(/ · $/, "");
 };
 const fname = f => sel.dir && new Set(curFiles().map(x => x.pk)).size > 1 ? f.pk + " · " + f.name : f.name;
 const curFiles = () => sel.pkg ? byName[sel.pkg].files : ALLF.filter(f => f.g === sel.dir);

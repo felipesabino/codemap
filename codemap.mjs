@@ -4,8 +4,10 @@
 //
 //   node codemap.mjs ~/projects/some-app            # writes code-map.html and opens it
 //   node codemap.mjs ~/projects/some-app -o map.html --depth 2 --tests --no-open
+//   node codemap.mjs github.com/owner/repo           # or owner/repo, or .../tree/<branch>/<subfolder>
 import fs from "node:fs";
 import path from "node:path";
+import os from "node:os";
 import { execFileSync, spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
@@ -24,14 +26,36 @@ for (let i = 0; i < argv.length; i++) {
   else if (a === "--tests") opt.tests = true;
   else if (a === "--no-open") opt.open = false;
   else if (a === "-h" || a === "--help") {
-    console.log("usage: codemap <folder> [-o out.html] [--depth N] [--tests] [--no-open]\n" +
+    console.log("usage: codemap <folder | github URL | owner/repo> [-o out.html] [--depth N] [--tests] [--no-open]\n" +
       "  --depth N   group folders to their first N path segments (0 = every folder)\n" +
       "  --tests     include *.test.* / *.spec.* / __tests__ files");
     process.exit(0);
   } else opt.root = a;
 }
+// ---------- source: a local folder, or a GitHub repo (shallow-cloned into a temp cache)
+// accepts https://github.com/o/r, github.com/o/r, git@github.com:o/r.git, o/r, and .../tree/<ref>/<sub/path>
+function githubSource(s) {
+  if (fs.existsSync(s)) return null;
+  const m = s.match(/^(?:https?:\/\/)?(?:www\.)?github\.com[/:]([\w.-]+)\/([\w.-]+?)(?:\.git)?(?:\/(?:tree|blob)\/([^/]+)(?:\/(.*))?)?\/?$/) ||
+    s.match(/^(?:git@github\.com:)([\w.-]+)\/([\w.-]+?)(?:\.git)?$/) ||
+    s.match(/^([\w.-]+)\/([\w.-]+)$/);
+  return m ? { owner: m[1], repo: m[2], ref: m[3] || "", sub: (m[4] || "").replace(/\/$/, "") } : null;
+}
+let gh = githubSource(opt.root);
+if (gh) {
+  const dir = path.join(os.tmpdir(), "codemap", `${gh.owner}__${gh.repo}${gh.ref ? "__" + gh.ref.replace(/[^\w.-]/g, "_") : ""}`);
+  fs.rmSync(dir, { recursive: true, force: true });
+  fs.mkdirSync(path.dirname(dir), { recursive: true });
+  const url = `https://github.com/${gh.owner}/${gh.repo}.git`;
+  console.log(`cloning ${url}${gh.ref ? " @ " + gh.ref : ""} …`);
+  try {
+    execFileSync("git", ["clone", "--depth", "1", "--single-branch", ...(gh.ref ? ["--branch", gh.ref] : []), url, dir], { stdio: ["ignore", "ignore", "inherit"] });
+  } catch { console.error(`codemap: could not clone ${url} (private repo, typo, or no network?)`); process.exit(1); }
+  opt.root = path.join(dir, gh.sub);
+  if (!fs.existsSync(opt.root)) { console.error(`codemap: ${gh.sub} not found in ${gh.owner}/${gh.repo}`); process.exit(1); }
+}
 const ROOT = fs.realpathSync(path.resolve(opt.root));
-const OUT = path.resolve(opt.out || "code-map.html");
+const OUT = path.resolve(opt.out || (gh ? `code-map-${gh.repo}.html` : "code-map.html"));
 
 const EXT = /\.(m|c)?(t|j)sx?$/;
 const SKIP_DIRS = new Set(["node_modules", "dist", "build", "out", "coverage", "vendor", "bower_components", "storybook-static", "public"]);
@@ -40,12 +64,15 @@ const isTest = p => /\.(test|spec|stories)\.[^.]+$/.test(p) || /(^|\/)(__tests__
 
 // ---------- walk
 const files = [];
+const workspaces = new Map(); // package name -> {dir, json}: lets "@scope/pkg" imports resolve without node_modules
 (function walk(dir) {
   for (const d of fs.readdirSync(dir, { withFileTypes: true })) {
     const p = path.join(dir, d.name);
     if (d.isDirectory()) {
       if (d.name.startsWith(".") || SKIP_DIRS.has(d.name)) continue;
       walk(p);
+    } else if (d.name === "package.json") {
+      try { const j = JSON.parse(fs.readFileSync(p, "utf8")); if (j.name) workspaces.set(j.name, { dir, json: j }); } catch {}
     } else if (d.isFile() && EXT.test(d.name) && !d.name.endsWith(".d.ts") && !/\.min\.js$/.test(d.name) && !isConfig(d.name)) {
       const rel = path.relative(ROOT, p).split(path.sep).join("/");
       if (!opt.tests && isTest(rel)) continue;
@@ -101,9 +128,25 @@ function resolve(spec, from) {
       else if (!f.startsWith(ROOT + path.sep) || f.includes("/node_modules/")) out = { external: pkgName(spec) };
     }
   } catch {}
+  // a workspace package of this repo is never "npm", even when the target is a skipped (test) file
+  if (!out?.internal && workspaces.has(pkgName(spec))) { const f = workspaceFile(spec); out = f ? { internal: f } : { skipped: true }; }
   if (!out && !spec.startsWith(".") && !spec.startsWith("/")) out = { external: pkgName(spec) };
   resCache.set(key, out);
   return out;
+}
+// "@scope/pkg/sub" -> a source file inside that workspace package, trying its entry fields and dist/ -> src/
+function workspaceFile(spec) {
+  const name = pkgName(spec), { dir, json } = workspaces.get(name);
+  const sub = spec.slice(name.length).replace(/^\//, "");
+  const strings = v => typeof v === "string" ? [v] : v && typeof v === "object" ? Object.values(v).flatMap(strings) : [];
+  const entries = sub ? [...strings(json.exports?.["./" + sub]), sub, "src/" + sub] :
+    [json.source, ...strings(json.exports?.["."] ?? (typeof json.exports === "string" ? json.exports : null)), json.module, json.main, json.types, "src/index", "index"].filter(Boolean);
+  const cands = entries.flatMap(e => { const c = e.replace(/^\.\//, ""); const noExt = c.replace(/\.(d\.[cm]?ts|[cm]?[jt]sx?)$/, ""); return [c, noExt, noExt.replace(/^(dist|lib|build|out|esm|cjs)\//, "src/")]; });
+  for (const c of new Set(cands)) {
+    const r = ts.resolveModuleName("./" + c, path.join(dir, "__codemap.ts"), baseOpts, ts.sys).resolvedModule;
+    if (r) { let f = r.resolvedFileName; try { f = fs.realpathSync(f); } catch {} if (fileSet.has(f)) return f; }
+  }
+  return null;
 }
 const pkgName = s => s.startsWith("node:") ? s : s.startsWith("@") ? s.split("/").slice(0, 2).join("/") : s.split("/")[0];
 
@@ -248,7 +291,8 @@ const modules = [...packages.values()].sort((a, b) => a.name.localeCompare(b.nam
 }));
 
 let name = path.basename(ROOT), rev = "", source = "";
-try { name = JSON.parse(fs.readFileSync(path.join(ROOT, "package.json"), "utf8")).name || name; } catch {}
+if (gh) name = gh.sub ? `${gh.repo}/${gh.sub}` : gh.repo;
+else try { name = JSON.parse(fs.readFileSync(path.join(ROOT, "package.json"), "utf8")).name || name; } catch {}
 const git = (...a) => execFileSync("git", ["-C", ROOT, ...a], { stdio: ["ignore", "pipe", "ignore"] }).toString().trim();
 try {
   rev = git("rev-parse", "--short", "HEAD");
@@ -257,7 +301,7 @@ try {
   if (m) source = `https://github.com/${m[1]}/${m[2]}/blob/${git("rev-parse", "HEAD")}/${git("rev-parse", "--show-prefix")}`;
 } catch {}
 
-const data = { name, root: ROOT, rev, source, depth: opt.depth, lines: totalLines, pkgs, packages: modules };
+const data = { name, root: ROOT, label: gh ? `github.com/${gh.owner}/${gh.repo}${gh.ref ? " @ " + gh.ref : ""}${gh.sub ? " · " + gh.sub : ""}` : ROOT, local: !gh, rev, source, depth: opt.depth, lines: totalLines, pkgs, packages: modules };
 const tpl = fs.readFileSync(path.join(HERE, "template.html"), "utf8");
 const json = JSON.stringify(data).replace(/</g, "\\u003c");
 const esc = s => s.replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));

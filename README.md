@@ -3,7 +3,8 @@
 Point it at a JS/TS folder; get one self-contained HTML page with a layered package (or folder) dependency map (import cycles in red) and a searchable files → functions browser.
 
 ```bash
-npm i && node codemap.mjs ~/projects/some-app --depth 3
+npm i && node codemap.mjs ~/projects/some-app
+node codemap.mjs trpc/trpc        # or any github.com URL, incl. /tree/<branch>/<subfolder>
 ```
 
 Options: `-o out.html`, `--depth N` (group folders to N path segments), `--tests`, `--no-open`.
