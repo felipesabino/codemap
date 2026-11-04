@@ -1,0 +1,297 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{NAME}} code map</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;600&family=IBM+Plex+Mono:wght@400;600&display=swap">
+<style>
+:root {
+  --bg: #f6f5f1; --panel: #fff; --ink: #1d1d1b; --muted: #6b6a64; --line: #e2e0d8; --hl: #f1efe6; --accent: #2563eb; --out: #d97706; --cyc: #dc2626;
+  --c0: #2563eb; --c1: #059669; --c2: #d97706; --c3: #9333ea; --c4: #db2777; --c5: #0891b2; --c6: #65a30d; --c7: #78716c;
+  --sans: "IBM Plex Sans", system-ui, sans-serif; --mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #141413; --panel: #1c1c1a; --ink: #ecebe6; --muted: #9b9a92; --line: #2e2d29; --hl: #26251f; --accent: #60a5fa; --out: #fbbf24; --cyc: #f87171;
+  --c0: #60a5fa; --c1: #34d399; --c2: #fbbf24; --c3: #c084fc; --c4: #f472b6; --c5: #22d3ee; --c6: #a3e635; --c7: #a8a29e; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #141413; --panel: #1c1c1a; --ink: #ecebe6; --muted: #9b9a92; --line: #2e2d29; --hl: #26251f; --accent: #60a5fa; --out: #fbbf24; --cyc: #f87171;
+  --c0: #60a5fa; --c1: #34d399; --c2: #fbbf24; --c3: #c084fc; --c4: #f472b6; --c5: #22d3ee; --c6: #a3e635; --c7: #a8a29e; color-scheme: dark }
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.5 var(--sans); }
+main { max-width: 1400px; margin: 0 auto; padding: 24px 16px 56px; }
+h1 { font: 600 28px/1.2 var(--sans); margin: 0; letter-spacing: -.01em; }
+h2 { font: 600 17px/1.2 var(--sans); margin: 0 0 6px; }
+.sub { color: var(--muted); margin: 4px 0 0; font: 13px var(--mono); overflow-wrap: anywhere; }
+.stats { display: flex; flex-wrap: wrap; gap: 6px 24px; margin-top: 14px; font-variant-numeric: tabular-nums; }
+.stats b { font-size: 20px; } .stats span { color: var(--muted); font-size: 13px; }
+.stats .bad b { color: var(--cyc); }
+section { margin-top: 28px; }
+.legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 13px; color: var(--muted); margin-bottom: 8px; }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
+.mapbar { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; font-size: 13px; color: var(--muted); flex-wrap: wrap; }
+.mapbar button { font: 13px var(--sans); border: 1px solid var(--line); background: var(--panel); color: var(--ink); border-radius: 6px; padding: 3px 10px; cursor: pointer; }
+.mapwrap { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; overflow: auto; max-height: 78vh; }
+#map { display: block; }
+svg text { font: 12px var(--mono); fill: var(--ink); pointer-events: none; }
+svg .band { font: 10px var(--sans); fill: var(--muted); letter-spacing: .08em; text-transform: uppercase; }
+svg .bandbg { fill: var(--hl); opacity: .5; }
+.node { cursor: pointer; }
+.node rect.box { fill: var(--panel); stroke-width: 1.5; }
+.node.dim { opacity: .18; }
+.node.on rect.box { stroke-width: 3; fill: var(--hl); }
+.edge { fill: none; stroke: var(--muted); stroke-opacity: .18; stroke-width: 1; }
+.edge.cyc { stroke: var(--cyc); stroke-opacity: .45; stroke-dasharray: 4 3; }
+.edge.dim { stroke-opacity: .04; }
+.edge.in { stroke: var(--accent); stroke-opacity: .9; stroke-width: 1.8; }
+.edge.out { stroke: var(--out); stroke-opacity: .9; stroke-width: 1.8; }
+.hint { font-size: 13px; color: var(--muted); margin-top: 8px; }
+.hint .i { color: var(--accent); font-weight: 600; } .hint .o { color: var(--out); font-weight: 600; } .hint .c { color: var(--cyc); font-weight: 600; }
+.browser { display: grid; grid-template-columns: minmax(0, 260px) minmax(0, 260px) minmax(0, 1fr); background: var(--panel);
+  border: 1px solid var(--line); border-radius: 10px; overflow: hidden; min-height: 520px; }
+.col { border-right: 1px solid var(--line); overflow-y: auto; max-height: 680px; min-width: 0; }
+.col:last-child { border-right: 0; }
+.colhead { position: sticky; top: 0; background: var(--panel); padding: 9px 12px; font-size: 11px; letter-spacing: .07em; text-transform: uppercase;
+  color: var(--muted); border-bottom: 1px solid var(--line); z-index: 1; overflow-wrap: anywhere; }
+.item { display: flex; align-items: baseline; gap: 8px; width: 100%; text-align: left; padding: 6px 12px; border: 0; background: none; color: var(--ink);
+  font: 13px var(--mono); cursor: pointer; border-left: 3px solid transparent; }
+.item:hover { background: var(--hl); } .item.on { background: var(--hl); border-left-color: var(--accent); }
+.item .n { flex: 1; min-width: 0; overflow-wrap: anywhere; } .item .c { color: var(--muted); font-size: 12px; }
+.dot { width: 8px; height: 8px; border-radius: 2px; flex: none; }
+.pdoc { padding: 10px 12px; border-bottom: 1px solid var(--line); font-size: 13px; color: var(--muted); }
+.pdoc b { color: var(--ink); font: 600 14px var(--mono); display: block; overflow-wrap: anywhere; }
+.pdoc div { margin-top: 5px; }
+.pdoc a { color: var(--accent); cursor: pointer; font: 12px var(--mono); }
+.pdoc code { font: 12px var(--mono); color: var(--ink); }
+.fn { padding: 7px 14px; border-bottom: 1px solid var(--line); display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 12px; }
+.fn .sig { font: 13px var(--mono); overflow-wrap: anywhere; } .fn .sig .r, .fn .sig .w { color: var(--muted); } .fn .sig .x { font-weight: 600; }
+.fn .meta { font-size: 12px; color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.fn .meta a { color: var(--accent); text-decoration: none; }
+.fn .doc { grid-column: 1 / -1; font-size: 13px; color: var(--muted); }
+.bar { height: 3px; border-radius: 2px; background: var(--accent); opacity: .45; grid-column: 1 / -1; }
+.tools { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin-bottom: 10px; }
+input[type=search] { font: 14px var(--sans); padding: 7px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--ink); width: min(100%, 360px); }
+.tools label { font-size: 13px; color: var(--muted); display: flex; gap: 6px; align-items: center; }
+.empty { padding: 16px; color: var(--muted); font-size: 14px; }
+.foot { margin-top: 16px; font-size: 13px; color: var(--muted); }
+@media (max-width: 760px) { .browser { grid-template-columns: minmax(0, 1fr); } .col { border-right: 0; border-bottom: 1px solid var(--line); max-height: 300px; } }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>{{NAME}} code map</h1>
+    <p class="sub" id="root"></p>
+    <div class="stats" id="stats"></div>
+  </header>
+  <section>
+    <h2>How the folders depend on each other</h2>
+    <div class="legend" id="legend"></div>
+    <div class="mapbar">
+      <button id="zout" aria-label="Zoom out">−</button><button id="zin" aria-label="Zoom in">+</button><button id="zfit">Fit</button>
+      <span>Bottom rows are foundations; each row only imports rows below it. <span style="color:var(--cyc)">Red dashed</span> = import cycle.</span>
+    </div>
+    <div class="mapwrap" id="wrap"><svg id="map" role="img" aria-label="Folder dependency map"></svg></div>
+    <p class="hint" id="hint">Click a folder to see <span class="o">what it imports</span> and <span class="i">what imports it</span>.</p>
+  </section>
+  <section>
+    <h2>Files and functions</h2>
+    <div class="tools">
+      <input type="search" id="q" placeholder="Search functions everywhere…" aria-label="Search functions">
+      <label><input type="checkbox" id="exported"> Exported only</label>
+    </div>
+    <div class="browser"><div class="col" id="pkgs"></div><div class="col" id="files"></div><div class="col" id="fns"></div></div>
+    <p class="foot" id="foot"></p>
+  </section>
+</main>
+<script type="application/json" id="data">/*{{DATA}}*/</script>
+<script>
+const D = JSON.parse(document.getElementById("data").textContent);
+const P = D.pkgs, $ = id => document.getElementById(id);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]));
+const num = n => n.toLocaleString("en");
+const byPath = Object.fromEntries(P.map(p => [p.path, p]));
+for (const p of P) {
+  p.nfn = p.files.reduce((a, f) => a + f.funcs.length, 0);
+  p.lines = p.files.reduce((a, f) => a + f.lines, 0);
+  p.usedBy = P.filter(q => q.imports.includes(p.path)).map(q => q.path);
+}
+$("root").textContent = D.root + (D.depth ? `  ·  grouped to depth ${D.depth}` : "");
+
+// ---- colour by top-level folder
+const topOf = p => p === "." ? "." : p.split("/")[0];
+const tops = {};
+for (const p of P) (tops[topOf(p.path)] ||= []).push(p.path);
+const order = Object.entries(tops).sort((a, b) => b[1].length - a[1].length).map(e => e[0]);
+const cidx = t => Math.min(order.indexOf(t), 7);
+const color = p => `var(--c${cidx(topOf(p))})`;
+$("legend").innerHTML = order.slice(0, 7).map((t, i) => `<span><i style="background:var(--c${i})"></i>${esc(t === "." ? "(root)" : t + "/")}</span>`).join("") +
+  (order.length > 7 ? `<span><i style="background:var(--c7)"></i>${order.length - 7} more</span>` : "");
+
+// ---- strongly connected components (import cycles), Tarjan
+const sccOf = {}, sccs = [];
+{ let idx = 0; const st = [], on = new Set(), I = {}, L = {};
+  const go = v => { I[v] = L[v] = idx++; st.push(v); on.add(v);
+    for (const w of byPath[v].imports) { if (!byPath[w]) continue;
+      if (I[w] === undefined) { go(w); L[v] = Math.min(L[v], L[w]); } else if (on.has(w)) L[v] = Math.min(L[v], I[w]); }
+    if (L[v] === I[v]) { const c = []; let w; do { w = st.pop(); on.delete(w); sccOf[w] = sccs.length; c.push(w); } while (w !== v); sccs.push(c); } };
+  for (const p of P) if (I[p.path] === undefined) go(p.path); }
+const cyclic = sccs.filter(c => c.length > 1);
+const inCycle = (a, b) => sccOf[a] === sccOf[b] && sccs[sccOf[a]].length > 1;
+
+const tf = P.reduce((a, p) => a + p.files.length, 0), tfn = P.reduce((a, p) => a + p.nfn, 0);
+$("stats").innerHTML = [[P.length, "folders"], [tf, "files"], [tfn, "functions"], [D.lines, "lines"]]
+  .map(([n, l]) => `<div><b>${num(n)}</b> <span>${l}</span></div>`).join("") +
+  `<div class="${cyclic.length ? "bad" : ""}"><b>${cyclic.length}</b> <span>import cycles${cyclic.length ? " (" + cyclic.reduce((a, c) => a + c.length, 0) + " folders)" : ""}</span></div>`;
+
+// ---- layers: an SCC sits one row above the highest SCC it imports
+const sl = [];
+const sdepth = s => {
+  if (sl[s] !== undefined) return sl[s];
+  sl[s] = 0;
+  let m = -1;
+  for (const v of sccs[s]) for (const w of byPath[v].imports) if (byPath[w] && sccOf[w] !== s) m = Math.max(m, sdepth(sccOf[w]));
+  return (sl[s] = m + 1);
+};
+const layer = {};
+for (const p of P) layer[p.path] = sdepth(sccOf[p.path]);
+const nL = Math.max(...Object.values(layer)) + 1;
+const W = p => Math.max(60, 18 + Math.min(p.length, 34) * 7.3) + Math.min(50, byPath[p].nfn / 3);
+const label = p => p.length > 34 ? "…" + p.slice(-33) : p;
+const BOXH = 28, LINEH = 50, BANDGAP = 34, PADX = 90, GAP = 12, MAXW = Math.max(1100, Math.min(2400, Math.sqrt(P.length) * 260));
+const pos = {};
+
+// order each layer by barycentre of neighbours already placed; a few sweeps
+const rows = Array.from({length: nL}, () => []);
+for (const p of P) rows[layer[p.path]].push(p.path);
+rows.forEach(r => r.sort());
+const place = () => {
+  let y = 20; const bands = [];
+  for (let i = nL - 1; i >= 0; i--) {
+    const lines = [[]]; let x = PADX;
+    for (const p of rows[i]) { const w = W(p); if (x + w > MAXW && lines.at(-1).length) { lines.push([]); x = PADX; } lines.at(-1).push(p); x += w + GAP; }
+    const y0 = y;
+    for (const ln of lines) {
+      const tw = ln.reduce((a, p) => a + W(p), 0) + GAP * (ln.length - 1);
+      let x = PADX + Math.max(0, (MAXW - PADX - tw) / 2);
+      for (const p of ln) { const w = W(p); pos[p] = {x, y, w, cx: x + w / 2}; x += w + GAP; }
+      y += LINEH;
+    }
+    bands.push({i, y0, y1: y - LINEH + BOXH}); y += BANDGAP;
+  }
+  return {bands, height: y - BANDGAP + 20};
+};
+let lay = place();
+for (let pass = 0; pass < 4; pass++) {
+  const bary = p => { const n = [...byPath[p].imports, ...byPath[p].usedBy].filter(x => pos[x]); return n.length ? n.reduce((a, x) => a + pos[x].cx, 0) / n.length : pos[p].cx; };
+  for (const r of rows) { const b = Object.fromEntries(r.map(p => [p, bary(p)])); r.sort((a, c) => b[a] - b[c]); }
+  lay = place();
+}
+const width = MAXW + 20, height = lay.height;
+const svg = $("map");
+svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+let bg = "", edges = "", nodes = "";
+for (const b of lay.bands) {
+  bg += `<rect class="bandbg" x="0" y="${b.y0 - 10}" width="${width}" height="${b.y1 - b.y0 + 20}"/>` +
+    `<text class="band" x="10" y="${b.y0 + 5}">${b.i === 0 ? "foundation" : "layer " + b.i}</text>`;
+}
+for (const p of P) for (const t of p.imports) {
+  const a = pos[p.path], b = pos[t]; if (!b) continue;
+  const cyc = inCycle(p.path, t);
+  let d;
+  if (a.y === b.y) { const ry = a.y - 18 - Math.min(40, Math.abs(a.cx - b.cx) / 6); d = `M${a.cx},${a.y} C${a.cx},${ry} ${b.cx},${ry} ${b.cx},${b.y}`; }
+  else if (b.y > a.y) { const y1 = a.y + BOXH, my = (y1 + b.y) / 2; d = `M${a.cx},${y1} C${a.cx},${my} ${b.cx},${my} ${b.cx},${b.y}`; }
+  else { const y2 = b.y + BOXH, my = (a.y + y2) / 2; d = `M${a.cx},${a.y} C${a.cx},${my} ${b.cx},${my} ${b.cx},${y2}`; }
+  edges += `<path class="edge${cyc ? " cyc" : ""}" data-f="${esc(p.path)}" data-t="${esc(t)}" d="${d}"><title>${esc(p.path)} → ${esc(t)} (${p.weights[t] || 1} imports)</title></path>`;
+}
+for (const p of P) {
+  const q = pos[p.path];
+  nodes += `<g class="node" tabindex="0" role="button" data-p="${esc(p.path)}">
+    <rect class="box" x="${q.x}" y="${q.y}" width="${q.w}" height="${BOXH}" rx="6" style="stroke:${color(p.path)}"/>
+    <rect x="${q.x}" y="${q.y}" width="5" height="${BOXH}" rx="2" style="fill:${color(p.path)}"/>
+    <text x="${q.cx + 2}" y="${q.y + 18}" text-anchor="middle">${esc(label(p.path))}</text>
+    <title>${esc(p.path)}\n${p.files.length} files · ${p.nfn} functions · ${num(p.lines)} lines\nimports ${p.imports.length} · imported by ${p.usedBy.length}</title></g>`;
+}
+svg.innerHTML = bg + `<g>${edges}</g><g>${nodes}</g>`;
+
+// zoom
+let zoom = 1;
+const fit = () => Math.min(1, ($("wrap").clientWidth - 2) / width);
+const setZoom = z => { zoom = Math.max(.2, Math.min(3, z)); svg.style.width = width * zoom + "px"; svg.style.height = height * zoom + "px"; };
+$("zin").onclick = () => setZoom(zoom * 1.25); $("zout").onclick = () => setZoom(zoom / 1.25); $("zfit").onclick = () => setZoom(fit());
+setZoom(Math.max(fit(), .55));
+
+function highlight(p) {
+  const near = new Set(p ? [p, ...byPath[p].imports, ...byPath[p].usedBy] : []);
+  svg.querySelectorAll(".node").forEach(n => { n.classList.toggle("on", n.dataset.p === p); n.classList.toggle("dim", !!p && !near.has(n.dataset.p)); });
+  svg.querySelectorAll(".edge").forEach(e => {
+    const o = e.dataset.f === p, i = e.dataset.t === p;
+    e.classList.toggle("out", o); e.classList.toggle("in", i); e.classList.toggle("dim", !!p && !o && !i);
+  });
+  if (p) {
+    const k = byPath[p], cyc = sccs[sccOf[p]].length > 1;
+    $("hint").innerHTML = `<b>${esc(p)}</b> <span class="o">imports ${k.imports.length}</span> and <span class="i">is imported by ${k.usedBy.length}</span> folders` +
+      (cyc ? ` · <span class="c">in a cycle with ${sccs[sccOf[p]].length - 1} other folder(s)</span>` : "") + ".";
+  }
+}
+svg.addEventListener("click", e => { const n = e.target.closest(".node"); if (n) select(n.dataset.p, true); });
+svg.addEventListener("keydown", e => { const n = e.target.closest(".node"); if (n && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); select(n.dataset.p, true); } });
+
+// ---- browser
+let cur = [...P].sort((a, b) => b.usedBy.length - a.usedBy.length || b.nfn - a.nfn)[0].path, curFile = "", query = "", expOnly = false;
+const maxLen = Math.min(200, Math.max(1, ...P.flatMap(p => p.files.flatMap(f => f.funcs.map(x => x.s)))));
+const link = (file, line) => {
+  const gh = D.source ? `<a href="${esc(D.source + file.rel)}#L${line}" target="_blank" rel="noopener">github</a> · ` : "";
+  return gh + `<a href="vscode://file${esc(encodeURI(D.root + "/" + file.rel))}:${line}">open</a>`;
+};
+const fnRow = (f, p, file, where) => `<div class="fn">
+  <div class="sig">${f.r ? `<span class="r">${esc(f.r)}.</span>` : ""}<span class="${f.e ? "x" : ""}">${esc(f.n)}</span>${where ? ` <span class="w">· ${esc(file.rel)}</span>` : ""}</div>
+  <div class="meta">:${f.l} · ${f.s} lines · ${link(file, f.l)}</div>
+  ${f.d ? `<div class="doc">${esc(f.d)}</div>` : ""}
+  <div class="bar" style="width:${Math.min(100, Math.max(1, 100 * f.s / maxLen))}%"></div></div>`;
+function renderPkgs() {
+  $("pkgs").innerHTML = `<div class="colhead">Folders, most functions first</div>` + [...P].sort((a, b) => b.nfn - a.nfn).map(p =>
+    `<button class="item${p.path === cur ? " on" : ""}" data-pkg="${esc(p.path)}"><span class="dot" style="background:${color(p.path)}"></span>
+      <span class="n">${esc(p.path)}</span><span class="c">${p.nfn}</span></button>`).join("");
+}
+function renderFiles() {
+  const p = byPath[cur];
+  const list = l => l.length ? l.map(x => `<a data-go="${esc(x)}">${esc(x)}</a>`).join(", ") : "—";
+  $("files").innerHTML = `<div class="colhead">${esc(cur)}</div><div class="pdoc"><b>${esc(cur)}</b>
+    <div>Imports: ${list(p.imports)}</div><div>Imported by: ${list(p.usedBy)}</div>
+    ${p.ext.length ? `<div>Packages: <code>${p.ext.map(esc).join(", ")}</code></div>` : ""}</div>
+    <button class="item${curFile === "" ? " on" : ""}" data-file=""><span class="n">all ${p.files.length} files</span><span class="c">${p.nfn}</span></button>` +
+    p.files.map(f => `<button class="item${f.name === curFile ? " on" : ""}" data-file="${esc(f.name)}"><span class="n">${esc(f.name)}</span><span class="c">${f.funcs.length}</span></button>`).join("");
+}
+function renderFns() {
+  let out = "", n = 0;
+  const ok = f => (!expOnly || f.e) && (!query || (f.n + " " + (f.r || "") + " " + (f.d || "")).toLowerCase().includes(query));
+  if (query) {
+    for (const p of P) for (const file of p.files) for (const f of file.funcs) if (ok(f) && n < 300) { out += fnRow(f, p.path, file, true); n++; }
+    $("fns").innerHTML = `<div class="colhead">Matching “${esc(query)}” everywhere${n >= 300 ? " (first 300)" : ""}</div>` + (out || `<div class="empty">No match.</div>`);
+    return;
+  }
+  for (const file of byPath[cur].files) {
+    if (curFile && file.name !== curFile) continue;
+    const fs = file.funcs.filter(ok); if (!fs.length) continue;
+    if (!curFile) out += `<div class="colhead" style="position:static">${esc(file.name)} · ${num(file.lines)} lines</div>`;
+    out += fs.map(f => fnRow(f, cur, file, false)).join(""); n += fs.length;
+  }
+  $("fns").innerHTML = (curFile ? `<div class="colhead">${esc(curFile)} · ${n} functions</div>` : "") + (out || `<div class="empty">No functions here${expOnly ? " that are exported" : ""}.</div>`);
+}
+function select(p, fromMap) {
+  cur = p; curFile = ""; renderPkgs(); renderFiles(); renderFns(); highlight(p); $("files").scrollTop = 0;
+  if (!fromMap) { const n = svg.querySelector(`.node[data-p="${CSS.escape(p)}"]`); n?.scrollIntoView({block: "nearest", inline: "center", behavior: "smooth"}); }
+}
+$("pkgs").addEventListener("click", e => { const b = e.target.closest("[data-pkg]"); if (b) select(b.dataset.pkg); });
+$("files").addEventListener("click", e => {
+  const g = e.target.closest("[data-go]"); if (g) return select(g.dataset.go);
+  const b = e.target.closest("[data-file]"); if (b) { curFile = b.dataset.file; renderFiles(); renderFns(); }
+});
+$("q").addEventListener("input", e => { query = e.target.value.trim().toLowerCase(); renderFns(); });
+$("exported").addEventListener("change", e => { expOnly = e.target.checked; renderFns(); });
+$("foot").textContent = `${D.rev ? "Commit " + D.rev + ". " : ""}Bold = exported. Type-only imports and tests are left out. “open” jumps to the line in VS Code${D.source ? "; “github” opens it on GitHub" : ""}.`;
+select(cur, true);
+</script>
+</body>
+</html>

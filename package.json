@@ -1,0 +1,7 @@
+{
+  "name": "js-codemap",
+  "private": true,
+  "type": "module",
+  "bin": { "codemap": "./codemap.mjs" },
+  "dependencies": { "typescript": "^5.9.3" }
+}
