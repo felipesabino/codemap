@@ -39,7 +39,6 @@ jobs:
       ISSUE: ${{ github.event.issue.number }}
       OLLAMA_HOST: http://127.0.0.1:11434
       OLLAMA_MODEL: qwen2.5:1.5b
-      PAGES_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}
       RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
     steps:
       - name: Skip if another run already handled this issue
@@ -135,6 +134,7 @@ jobs:
           PAGE: ${{ steps.gen.outputs.page }}
           HOW: ${{ steps.commit.outputs.how }}
         run: |
+          PAGES_URL=$(gh api "repos/$GITHUB_REPOSITORY/pages" -q .html_url); PAGES_URL=${PAGES_URL%/}
           stats=$(node -e 'const m=require(process.argv[1]); const s=m.stats; console.log(`${s.packages} packages · ${s.files} files · ${s.functions} functions · ${s.lines} lines, at commit \`${m.sha.slice(0,7)}\``)' "$RUNNER_TEMP/out/$PAGE/meta.json")
           verb=$([ "$HOW" = updated ] && echo "Updated" || echo "Done")
           gh issue comment "$ISSUE" -R "$GITHUB_REPOSITORY" --body "$verb: **[${PAGE%/}]($PAGES_URL/$PAGE)**

@@ -9,7 +9,7 @@ node codemap.mjs trpc/trpc        # or any github.com URL, incl. /tree/<branch>/
 
 Options: `-o out.html`, `--depth N|auto` (group folders to N path segments), `--tests`, `--meta out.json`, `--back URL`, `--no-open`.
 
-## Site: https://felipesabino.github.io/codemap/
+## Site: http://felipe.sabino.me/codemap/
 
 A catalog of maps, one page per repo (`/<owner>/<repo>/`), searchable from the home page.
 
