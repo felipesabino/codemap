@@ -1,0 +1,27 @@
+# Copy the home page (site/index.html, site/404.html) to gh-pages when it changes on main.
+name: site
+on:
+  push:
+    branches: [main]
+    paths: ["site/index.html", "site/404.html"]
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git config --global user.name "codemap bot"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          remote="https://x-access-token:$GH_TOKEN@github.com/$GITHUB_REPOSITORY.git"
+          if git ls-remote --exit-code origin gh-pages >/dev/null; then git clone -q --depth 1 --branch gh-pages "$remote" "$RUNNER_TEMP/site"
+          else git init -q -b gh-pages "$RUNNER_TEMP/site" && git -C "$RUNNER_TEMP/site" remote add origin "$remote"; fi
+          cp site/index.html site/404.html "$RUNNER_TEMP/site/" && touch "$RUNNER_TEMP/site/.nojekyll"
+          [ -f "$RUNNER_TEMP/site/repos.json" ] || echo '{"updated":null,"items":[]}' > "$RUNNER_TEMP/site/repos.json"
+          cd "$RUNNER_TEMP/site" && git add -A
+          git diff --cached --quiet && { echo "no changes"; exit 0; }
+          git commit -qm "home page from ${GITHUB_SHA::7}" && git push -q origin gh-pages

@@ -1,0 +1,10 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Code map not found</title>
+<script>
+// /<site>/<owner>/<repo>... with no map yet -> home page, searching for it (and offering to request it)
+const parts = location.pathname.split("/").filter(Boolean);
+const base = location.hostname.endsWith(".github.io") ? parts.shift() : null;
+const q = parts.join("/").replace(/\/index\.html$/, "");
+location.replace((base ? `/${base}/` : "/") + (q ? "?q=" + encodeURIComponent(q) : ""));
+</script></head>
+<body style="font-family:system-ui;background:#f6f5f1">Not found. <a href="./">See all code maps</a>.</body></html>

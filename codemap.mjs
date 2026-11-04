@@ -18,16 +18,20 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 
 // ---------- args
 const argv = process.argv.slice(2);
-const opt = { root: ".", out: null, depth: 0, tests: false, open: true };
+const opt = { root: ".", out: null, depth: 0, tests: false, open: true, meta: null, back: null };
 for (let i = 0; i < argv.length; i++) {
   const a = argv[i];
   if (a === "-o" || a === "--out") opt.out = argv[++i];
-  else if (a === "--depth") opt.depth = +argv[++i];
+  else if (a === "--depth") { const v = argv[++i]; opt.depth = v === "auto" ? "auto" : +v; }
+  else if (a === "--meta") opt.meta = argv[++i];
+  else if (a === "--back") opt.back = argv[++i];
   else if (a === "--tests") opt.tests = true;
   else if (a === "--no-open") opt.open = false;
   else if (a === "-h" || a === "--help") {
     console.log("usage: codemap <folder | github URL | owner/repo> [-o out.html] [--depth N] [--tests] [--no-open]\n" +
-      "  --depth N   group folders to their first N path segments (0 = every folder)\n" +
+      "  --depth N   group folders to their first N path segments (0 = every folder, auto = aim for <= 40 boxes)\n" +
+      "  --meta F    also write a JSON summary (source, commit, stats) to F\n" +
+      "  --back URL  add a \"← all code maps\" link to the page header\n" +
       "  --tests     include *.test.* / *.spec.* / __tests__ files");
     process.exit(0);
   } else opt.root = a;
@@ -152,6 +156,15 @@ const pkgName = s => s.startsWith("node:") ? s : s.startsWith("@") ? s.split("/"
 
 // ---------- grouping
 const relDir = f => { const d = path.relative(ROOT, path.dirname(f)).split(path.sep).join("/"); return d || "."; };
+if (opt.depth === "auto") {
+  const dirs = [...new Set(files.map(relDir))];
+  opt.depth = 0;
+  if (dirs.length > 60) for (let d = 1; d < 12; d++) {
+    if (new Set(dirs.map(x => x === "." ? x : x.split("/").slice(0, d).join("/"))).size > 40) break;
+    opt.depth = d;
+  }
+  if (!opt.depth && dirs.length > 60) opt.depth = 1;
+}
 const group = f => { const d = relDir(f); return opt.depth > 0 && d !== "." ? d.split("/").slice(0, opt.depth).join("/") : d; };
 const rel = f => path.relative(ROOT, f).split(path.sep).join("/") || ".";
 
@@ -305,8 +318,18 @@ const data = { name, root: ROOT, label: gh ? `github.com/${gh.owner}/${gh.repo}$
 const tpl = fs.readFileSync(path.join(HERE, "template.html"), "utf8");
 const json = JSON.stringify(data).replace(/</g, "\\u003c");
 const esc = s => s.replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
-fs.writeFileSync(OUT, tpl.replaceAll("{{NAME}}", esc(name)).replace("/*{{DATA}}*/", () => json));
+const back = opt.back ? `<a class="back" href="${esc(opt.back)}">← all code maps</a>` : "";
+fs.mkdirSync(path.dirname(OUT), { recursive: true });
+fs.writeFileSync(OUT, tpl.replaceAll("{{NAME}}", esc(name)).replace("<!--{{BACK}}-->", back).replace("/*{{DATA}}*/", () => json));
 const nfn = pkgs.reduce((a, p) => a + p.nfn, 0);
 console.log(`wrote ${OUT}: ${modules.length} packages, ${pkgs.length} folders, ${files.length} files, ${nfn} functions, ${totalLines} lines`);
+if (opt.meta) {
+  let sha = ""; try { sha = git("rev-parse", "HEAD"); } catch {}
+  fs.writeFileSync(opt.meta, JSON.stringify({
+    name, label: data.label, ...(gh || {}), sha, depth: opt.depth,
+    stats: { packages: modules.length, folders: pkgs.length, files: files.length, functions: nfn, lines: totalLines,
+      npm: new Set(pkgs.flatMap(p => p.ext || [])).size },
+  }, null, 2));
+}
 if (pkgs.length > 60 && !opt.depth) console.log(`tip: ${pkgs.length} folders is a lot to draw; try --depth 2, 3 or 4 to group them`);
 if (opt.open && process.stdout.isTTY) spawn(process.platform === "darwin" ? "open" : "xdg-open", [OUT], { detached: true, stdio: "ignore" }).unref();

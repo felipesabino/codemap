@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="codemap-repo" content="felipesabino/codemap">
+<title>JS Code Maps</title>
+<meta name="description" content="Dependency maps and function browsers for public JavaScript and TypeScript repositories.">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;600&family=IBM+Plex+Mono:wght@400;600&display=swap">
+<style>
+:root {
+  --bg: #f6f5f1; --panel: #fff; --ink: #1d1d1b; --muted: #6b6a64; --line: #e2e0d8; --hl: #f1efe6; --accent: #2563eb; --ok: #059669;
+  --sans: "IBM Plex Sans", system-ui, sans-serif; --mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #141413; --panel: #1c1c1a; --ink: #ecebe6; --muted: #9b9a92; --line: #2e2d29; --hl: #26251f; --accent: #60a5fa; --ok: #34d399; color-scheme: dark } }
+:root[data-theme="dark"] { --bg: #141413; --panel: #1c1c1a; --ink: #ecebe6; --muted: #9b9a92; --line: #2e2d29; --hl: #26251f; --accent: #60a5fa; --ok: #34d399; color-scheme: dark }
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.5 var(--sans); }
+main { max-width: 1100px; margin: 0 auto; padding: 40px 16px 64px; }
+h1 { font: 600 32px/1.15 var(--sans); margin: 0; letter-spacing: -.015em; }
+.lede { color: var(--muted); margin: 8px 0 0; max-width: 62ch; }
+.search { margin-top: 28px; display: flex; gap: 8px; }
+input[type=search], input[type=text] { flex: 1; min-width: 0; font: 16px var(--sans); color: var(--ink); background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
+input:focus { outline: 2px solid var(--accent); outline-offset: -1px; border-color: transparent; }
+button, .btn { font: 600 14px var(--sans); border: 1px solid var(--accent); background: var(--accent); color: var(--panel); border-radius: 10px; padding: 0 16px; cursor: pointer; text-decoration: none; display: inline-flex; align-items: center; white-space: nowrap; }
+button.ghost { background: var(--panel); color: var(--ink); border-color: var(--line); }
+.bar { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin: 18px 0 10px; color: var(--muted); font-size: 13px; flex-wrap: wrap; }
+.bar select { font: 13px var(--sans); color: var(--ink); background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 3px 6px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; }
+.card { display: flex; flex-direction: column; gap: 6px; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; text-decoration: none; color: inherit; min-width: 0; }
+.card:hover { border-color: var(--accent); }
+.card .id { font: 600 15px var(--mono); overflow-wrap: anywhere; }
+.card .id span { color: var(--muted); font-weight: 400; }
+.card p { margin: 0; color: var(--muted); font-size: 14px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.card .facts { margin-top: auto; padding-top: 4px; display: flex; flex-wrap: wrap; gap: 2px 14px; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.card .facts b { color: var(--ink); font-weight: 600; }
+.empty { background: var(--panel); border: 1px dashed var(--line); border-radius: 12px; padding: 28px 20px; text-align: center; }
+.empty h2 { font: 600 17px var(--sans); margin: 0 0 6px; }
+.empty p { margin: 0 0 14px; color: var(--muted); }
+.empty .btn { padding: 10px 16px; }
+section.add { margin-top: 40px; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 18px 16px; }
+section.add h2 { font: 600 17px var(--sans); margin: 0 0 4px; }
+section.add p { margin: 0 0 12px; color: var(--muted); font-size: 14px; }
+.add form { display: flex; gap: 8px; }
+.msg { margin-top: 8px; font-size: 13px; color: var(--muted); min-height: 1.5em; }
+.msg a { color: var(--accent); }
+mark { background: color-mix(in srgb, var(--accent) 22%, transparent); color: inherit; border-radius: 2px; }
+footer { margin-top: 40px; color: var(--muted); font-size: 13px; }
+footer a { color: inherit; }
+@media (max-width: 560px) { h1 { font-size: 26px; } .add form, .search { flex-direction: column; } button, .btn { padding: 10px 16px; justify-content: center; } }
+</style>
+</head>
+<body>
+<main>
+  <h1>JS Code Maps</h1>
+  <p class="lede">A dependency map and a files → functions browser for public JavaScript and TypeScript repositories. Search the ones already mapped, or request a new one.</p>
+
+  <div class="search">
+    <input type="search" id="q" placeholder="Search by name, description, topic or language, or paste a GitHub URL" autocomplete="off" aria-label="Search code maps">
+  </div>
+  <div class="bar">
+    <span id="count">Loading…</span>
+    <label>Sort <select id="sort"><option value="new">Newest</option><option value="stars">Most stars</option><option value="name">Name</option><option value="size">Most functions</option></select></label>
+  </div>
+  <div id="results" class="grid" aria-live="polite"></div>
+
+  <section class="add" id="add">
+    <h2>Map a new repository</h2>
+    <p>Paste a public GitHub repo, or a <code>/tree/&lt;branch&gt;/&lt;folder&gt;</code> link for part of one. This opens a GitHub issue; a bot replies there with the link when the map is ready, usually in a few minutes.</p>
+    <form id="addform">
+      <input type="text" id="addurl" placeholder="https://github.com/owner/repo" autocomplete="off" aria-label="GitHub repository URL">
+      <button type="submit">Request map</button>
+    </form>
+    <div class="msg" id="addmsg"></div>
+  </section>
+
+  <footer>Made with <a id="srclink" href="#">codemap</a>. Requests are <a id="issueslink" href="#">GitHub issues</a>.</footer>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const num = n => n >= 1e6 ? (n / 1e6).toFixed(1) + "M" : n >= 1e4 ? Math.round(n / 1e3) + "k" : n >= 1e3 ? (n / 1e3).toFixed(1) + "k" : String(n ?? 0);
+
+// which repo takes the requests: <owner>.github.io/<repo>/ when hosted on Pages, else the meta tag
+const REPO = location.hostname.endsWith(".github.io") && location.pathname.split("/")[1]
+  ? `${location.hostname.split(".")[0]}/${location.pathname.split("/")[1]}`
+  : document.querySelector('meta[name="codemap-repo"]').content;
+$("srclink").href = `https://github.com/${REPO}`;
+$("issueslink").href = `https://github.com/${REPO}/issues?q=label%3A%22new+source%22`;
+
+// "owner/repo", github.com URLs, git@ URLs, with optional /tree/<ref>/<sub>
+function parseRepo(s) {
+  s = s.trim();
+  const m = s.match(/^(?:https?:\/\/)?(?:www\.)?github\.com[/:]([\w.-]+)\/([\w.-]+?)(?:\.git)?(?:\/tree\/([\w.-]+)(?:\/([\w.\-/]+?))?)?\/?(?:[?#].*)?$/i) ||
+    s.match(/^([\w.-]+)\/([\w.-]+)$/);
+  if (!m) return null;
+  const [, owner, repo, ref = "", sub = ""] = m;
+  return { owner, repo, ref, sub, id: `${owner}/${repo}` + (ref ? `/tree/${ref}` + (sub ? `/${sub}` : "") : ""),
+    url: `https://github.com/${owner}/${repo}` + (ref ? `/tree/${ref}` + (sub ? `/${sub}` : "") : "") };
+}
+const requestUrl = r => `https://github.com/${REPO}/issues/new?` + new URLSearchParams({ template: "new-source.yml", title: `Map ${r.id}`, repo: r.url });
+const findMapped = r => items.find(x => x.id.toLowerCase() === r.id.toLowerCase());
+
+let items = [];
+function render() {
+  const raw = $("q").value.trim();
+  const asRepo = parseRepo(raw);
+  // a pasted URL searches for that repo; free text matches every word anywhere
+  const words = (asRepo ? `${asRepo.owner}/${asRepo.repo}` : raw).toLowerCase().split(/\s+/).filter(Boolean);
+  const hay = r => [r.id, r.description, r.language, ...(r.topics || [])].join(" ").toLowerCase();
+  let list = items.filter(r => words.every(w => hay(r).includes(w)));
+  const sort = $("sort").value;
+  list.sort(sort === "stars" ? (a, b) => (b.stars || 0) - (a.stars || 0)
+    : sort === "name" ? (a, b) => a.id.localeCompare(b.id)
+    : sort === "size" ? (a, b) => b.stats.functions - a.stats.functions
+    : (a, b) => b.savedAt.localeCompare(a.savedAt));
+  $("count").textContent = raw ? `${list.length} of ${items.length} maps` : `${items.length} maps`;
+  const hi = s => { let h = esc(s); for (const w of words) h = h.replace(new RegExp(`(${w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")})(?![^<]*>)`, "gi"), "<mark>$1</mark>"); return h; };
+
+  if (!list.length) {
+    $("results").innerHTML = asRepo
+      ? `<div class="empty"><h2>No map for ${esc(asRepo.id)} yet</h2><p>Request it and a bot will build it, then reply on the issue with the link.</p><a class="btn" href="${esc(requestUrl(asRepo))}" target="_blank" rel="noopener">Request a map for ${esc(asRepo.id)}</a></div>`
+      : `<div class="empty"><h2>Nothing matches “${esc(raw)}”</h2><p>Paste the repo’s GitHub URL here or below to request a map for it.</p><button class="ghost" onclick="document.getElementById('addurl').focus()">Map a new repository</button></div>`;
+    $("results").style.display = "block";
+    return;
+  }
+  $("results").style.display = "";
+  $("results").innerHTML = list.map(r => {
+    const [owner, ...restId] = r.id.split("/");
+    const saved = new Date(r.savedAt).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+    return `<a class="card" href="${esc(r.path)}">
+      <div class="id"><span>${hi(owner)}/</span>${hi(restId.join("/"))}</div>
+      ${r.description ? `<p>${hi(r.description)}</p>` : ""}
+      <div class="facts">
+        ${r.language ? `<span>${hi(r.language)}</span>` : ""}
+        <span><b>${num(r.stars)}</b> stars</span>
+        <span><b>${num(r.stats.files)}</b> files</span>
+        <span><b>${num(r.stats.functions)}</b> functions</span>
+        <span title="${esc(r.savedAt)} · commit ${esc((r.sha || "").slice(0, 7))}">mapped ${esc(saved)}</span>
+      </div></a>`;
+  }).join("");
+}
+
+$("addform").addEventListener("submit", e => {
+  e.preventDefault();
+  const r = parseRepo($("addurl").value);
+  if (!r) { $("addmsg").textContent = "That doesn't look like a GitHub repository. Try https://github.com/owner/repo."; return; }
+  const have = findMapped(r);
+  if (have) {
+    $("addmsg").innerHTML = `Already mapped: <a href="${esc(have.path)}">open ${esc(have.id)}</a> (saved ${esc(new Date(have.savedAt).toLocaleDateString())}). To refresh it, <a href="${esc(requestUrl(r))}" target="_blank" rel="noopener">request it again</a>.`;
+    return;
+  }
+  $("addmsg").innerHTML = `Opened a GitHub issue for ${esc(r.id)} in a new tab. Submit it there; the bot replies with the link.`;
+  window.open(requestUrl(r), "_blank", "noopener");
+});
+
+let t;
+$("q").addEventListener("input", () => { clearTimeout(t); t = setTimeout(() => {
+  render();
+  try { const u = new URL(location); $("q").value ? u.searchParams.set("q", $("q").value) : u.searchParams.delete("q"); history.replaceState(null, "", u); } catch {}
+}, 80); });
+$("sort").addEventListener("change", render);
+
+const q0 = new URLSearchParams(location.search).get("q");
+if (q0) { $("q").value = q0; if (parseRepo(q0)) $("addurl").value = q0; }
+fetch("repos.json", { cache: "no-cache" }).then(r => r.ok ? r.json() : { items: [] }).catch(() => ({ items: [] }))
+  .then(db => { items = db.items || []; render(); });
+</script>
+</body>
+</html>

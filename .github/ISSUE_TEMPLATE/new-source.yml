@@ -1,0 +1,18 @@
+name: Map a repository
+description: Ask for a code map of a public GitHub JavaScript/TypeScript repository.
+title: "Map "
+labels: ["new source"]
+body:
+  - type: input
+    id: repo
+    attributes:
+      label: GitHub repository
+      description: "A public repo, e.g. https://github.com/pmndrs/zustand. Add /tree/<branch>/<folder> to map part of one."
+      placeholder: https://github.com/owner/repo
+    validations:
+      required: true
+  - type: textarea
+    id: notes
+    attributes:
+      label: Notes
+      description: Optional.

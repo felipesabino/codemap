@@ -1,0 +1,149 @@
+# An issue labelled "new source" (the "Map a repository" form adds it) becomes a code map page:
+# comment "started" -> find the repo URL with a local Ollama model -> run codemap ->
+# commit the page + repos.json record to the gh-pages branch -> wait for Pages -> comment the link, close.
+name: new source
+
+on:
+  issues:
+    types: [opened, labeled]
+  workflow_dispatch:
+    inputs:
+      url:
+        description: GitHub repo URL to map
+        required: true
+
+permissions:
+  contents: write
+  issues: write
+  pages: read
+
+# one run per issue: opening a pre-labelled issue fires both "opened" and "labeled"
+concurrency:
+  group: new-source-${{ github.event.issue.number || github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  map:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.issue.state == 'open' && contains(github.event.issue.labels.*.name, 'new source') &&
+       (github.event.action == 'opened' || github.event.label.name == 'new source'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      ollama:
+        image: ollama/ollama:latest
+        ports: ["11434:11434"]
+    env:
+      GH_TOKEN: ${{ github.token }}
+      ISSUE: ${{ github.event.issue.number }}
+      OLLAMA_HOST: http://127.0.0.1:11434
+      OLLAMA_MODEL: qwen2.5:1.5b
+      PAGES_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    steps:
+      - name: Skip if another run already handled this issue
+        id: gate
+        run: |
+          if [ -z "$ISSUE" ]; then echo "go=1" >> "$GITHUB_OUTPUT"; exit 0; fi
+          state=$(gh issue view "$ISSUE" -R "$GITHUB_REPOSITORY" --json state,labels -q '.state + " " + ([.labels[].name] | join(","))')
+          echo "issue: $state"
+          case "$state" in OPEN*"new source"*) echo "go=1" >> "$GITHUB_OUTPUT";; *) echo "already handled";; esac
+
+      - name: Comment that processing started
+        if: steps.gate.outputs.go && env.ISSUE
+        run: gh issue comment "$ISSUE" -R "$GITHUB_REPOSITORY" --body "Processing started. Follow along in [this run]($RUN_URL)."
+
+      - uses: actions/checkout@v4
+        if: steps.gate.outputs.go
+      - uses: actions/setup-node@v4
+        if: steps.gate.outputs.go
+        with: { node-version: 22, cache: npm }
+      - if: steps.gate.outputs.go
+        run: npm ci
+
+      - name: Pull the Ollama model
+        if: steps.gate.outputs.go
+        run: |
+          for i in $(seq 30); do curl -sf "$OLLAMA_HOST/api/version" && break; sleep 2; done
+          curl -sf "$OLLAMA_HOST/api/pull" -d "{\"model\":\"$OLLAMA_MODEL\",\"stream\":false}"
+
+      - name: Find the repository URL in the issue
+        if: steps.gate.outputs.go
+        id: url
+        env:
+          # passed as env, never pasted into the script: issue text is untrusted
+          ISSUE_TITLE: ${{ github.event.issue.title }}
+          ISSUE_BODY: ${{ github.event.issue.body }}
+          DISPATCH_URL: ${{ inputs.url }}
+        run: echo "url=$(node site/extract-url.mjs)" >> "$GITHUB_OUTPUT"
+
+      - name: Build the code map
+        if: steps.gate.outputs.go
+        id: gen
+        env:
+          URL: ${{ steps.url.outputs.url }}
+          BY: ${{ github.event.issue.user.login || github.actor }}
+        run: |
+          page=$(node site/generate.mjs "$URL" "$RUNNER_TEMP/out" --issue "${ISSUE:-0}" --by "$BY" | tail -1)
+          echo "page=$page" >> "$GITHUB_OUTPUT"
+
+      - name: Commit it to gh-pages
+        if: steps.gate.outputs.go
+        id: commit
+        env:
+          PAGE: ${{ steps.gen.outputs.page }}
+        run: |
+          git config --global user.name "codemap bot"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # retry: another request may push between our fetch and push
+          for i in 1 2 3 4 5; do
+            rm -rf "$RUNNER_TEMP/site"
+            if git ls-remote --exit-code origin gh-pages >/dev/null; then
+              git clone -q --depth 1 --branch gh-pages "https://x-access-token:$GH_TOKEN@github.com/$GITHUB_REPOSITORY.git" "$RUNNER_TEMP/site"
+            else
+              git init -q -b gh-pages "$RUNNER_TEMP/site"
+              git -C "$RUNNER_TEMP/site" remote add origin "https://x-access-token:$GH_TOKEN@github.com/$GITHUB_REPOSITORY.git"
+            fi
+            cp site/index.html site/404.html "$RUNNER_TEMP/site/" && touch "$RUNNER_TEMP/site/.nojekyll"
+            rm -rf "$RUNNER_TEMP/site/$PAGE" && mkdir -p "$RUNNER_TEMP/site/$PAGE"
+            cp -R "$RUNNER_TEMP/out/$PAGE/." "$RUNNER_TEMP/site/$PAGE"
+            how=$(node site/upsert.mjs "$RUNNER_TEMP/site" "$PAGE")
+            cd "$RUNNER_TEMP/site"
+            git add -A && git commit -qm "map ${PAGE%/} (${how})${ISSUE:+, closes #$ISSUE}"
+            if git push -q origin gh-pages; then echo "how=$how" >> "$GITHUB_OUTPUT"; echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"; exit 0; fi
+            cd - >/dev/null; sleep $((i * 5))
+          done
+          exit 1
+
+      - name: Wait for GitHub Pages to publish it
+        if: steps.gate.outputs.go
+        env:
+          SHA: ${{ steps.commit.outputs.sha }}
+        run: |
+          for i in $(seq 60); do
+            b=$(gh api "repos/$GITHUB_REPOSITORY/pages/builds/latest" -q '.commit + " " + .status' 2>/dev/null || true)
+            echo "$b"
+            case "$b" in "$SHA built") exit 0;; "$SHA errored") exit 1;; esac
+            sleep 10
+          done
+          echo "Pages did not report a build for $SHA in 10 minutes; the page should still appear shortly."
+
+      - name: Comment the link and close the issue
+        if: steps.gate.outputs.go && env.ISSUE
+        env:
+          PAGE: ${{ steps.gen.outputs.page }}
+          HOW: ${{ steps.commit.outputs.how }}
+        run: |
+          stats=$(node -e 'const m=require(process.argv[1]); const s=m.stats; console.log(`${s.packages} packages · ${s.files} files · ${s.functions} functions · ${s.lines} lines, at commit \`${m.sha.slice(0,7)}\``)' "$RUNNER_TEMP/out/$PAGE/meta.json")
+          verb=$([ "$HOW" = updated ] && echo "Updated" || echo "Done")
+          gh issue comment "$ISSUE" -R "$GITHUB_REPOSITORY" --body "$verb: **[${PAGE%/}]($PAGES_URL/$PAGE)**
+
+          $stats. All maps: $PAGES_URL/"
+          gh issue edit "$ISSUE" -R "$GITHUB_REPOSITORY" --remove-label "new source" --add-label "mapped" || true
+          gh issue close "$ISSUE" -R "$GITHUB_REPOSITORY"
+
+      - name: Comment the failure
+        if: failure() && env.ISSUE
+        run: |
+          gh issue comment "$ISSUE" -R "$GITHUB_REPOSITORY" --body "Could not build this map. The [run log]($RUN_URL) has the reason. Common ones: no public GitHub repo link in the issue, a private repo, or no JS/TS files. Edit the issue, then remove and re-add the \`new source\` label to retry."
