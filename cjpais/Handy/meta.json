@@ -1,0 +1,32 @@
+{
+  "id": "cjpais/Handy",
+  "path": "cjpais/Handy/",
+  "source": "https://github.com/cjpais/Handy",
+  "owner": "cjpais",
+  "repo": "Handy",
+  "ref": "main",
+  "sub": "",
+  "sha": "82dfab9fda18c4bc24e1f6e56d36474d38eca0bc",
+  "description": "A free, open source, and extensible speech-to-text application that works completely offline.",
+  "language": "Rust",
+  "topics": [
+    "accessibility",
+    "cross-platform",
+    "speech-to-text",
+    "tauri-v2"
+  ],
+  "stars": 37516,
+  "homepage": "https://handy.computer",
+  "savedAt": "2026-11-04T21:00:33.074Z",
+  "issue": 2,
+  "requestedBy": "felipesabino",
+  "depth": 0,
+  "stats": {
+    "packages": 1,
+    "folders": 34,
+    "files": 217,
+    "functions": 570,
+    "lines": 24083,
+    "npm": 27
+  }
+}
