@@ -60,7 +60,7 @@ svg .bandbg { fill: var(--hl); opacity: .5; }
 .dot { width: 8px; height: 8px; border-radius: 2px; flex: none; }
 .pdoc { padding: 10px 12px; border-bottom: 1px solid var(--line); font-size: 13px; color: var(--muted); }
 .pdoc b { color: var(--ink); font: 600 14px var(--mono); display: block; overflow-wrap: anywhere; }
-.pdoc div { margin-top: 5px; }
+.pdoc div, .pdoc details { margin-top: 5px; } .pdoc summary { cursor: pointer; }
 .pdoc a { color: var(--accent); cursor: pointer; font: 12px var(--mono); }
 .pdoc code { font: 12px var(--mono); color: var(--ink); }
 .fn { padding: 7px 14px; border-bottom: 1px solid var(--line); display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 12px; }
@@ -111,11 +111,17 @@ const P = D.pkgs, $ = id => document.getElementById(id);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]));
 const num = n => n.toLocaleString("en");
 const byPath = Object.fromEntries(P.map(p => [p.path, p]));
-for (const p of P) {
-  p.nfn = p.files.reduce((a, f) => a + f.funcs.length, 0);
-  p.lines = p.files.reduce((a, f) => a + f.lines, 0);
-  p.usedBy = P.filter(q => q.imports.includes(p.path)).map(q => q.path);
+for (const p of P) p.usedBy = P.filter(q => q.imports.includes(p.path)).map(q => q.path);
+// packages (package.json / project.json roots) own the files
+const K = D.packages, byName = Object.fromEntries(K.map(k => [k.name, k]));
+for (const k of K) {
+  k.nfn = k.files.reduce((a, f) => a + f.funcs.length, 0);
+  k.lines = k.files.reduce((a, f) => a + f.lines, 0);
+  k.usedBy = K.filter(q => q.imports.includes(k.name)).map(q => q.name);
+  k.dirs = new Set(k.files.map(f => f.g));
+  for (const f of k.files) f.pk = k.name;
 }
+const ALLF = K.flatMap(k => k.files);
 $("root").textContent = D.root + (D.depth ? `  ·  grouped to depth ${D.depth}` : "");
 
 // ---- colour by top-level folder
@@ -139,8 +145,8 @@ const sccOf = {}, sccs = [];
 const cyclic = sccs.filter(c => c.length > 1);
 const inCycle = (a, b) => sccOf[a] === sccOf[b] && sccs[sccOf[a]].length > 1;
 
-const tf = P.reduce((a, p) => a + p.files.length, 0), tfn = P.reduce((a, p) => a + p.nfn, 0);
-$("stats").innerHTML = [[P.length, "folders"], [tf, "files"], [tfn, "functions"], [D.lines, "lines"]]
+const tf = ALLF.length, tfn = P.reduce((a, p) => a + p.nfn, 0);
+$("stats").innerHTML = [[K.length, "packages"], [P.length, "folders"], [tf, "files"], [tfn, "functions"], [D.lines, "lines"]]
   .map(([n, l]) => `<div><b>${num(n)}</b> <span>${l}</span></div>`).join("") +
   `<div class="${cyclic.length ? "bad" : ""}"><b>${cyclic.length}</b> <span>import cycles${cyclic.length ? " (" + cyclic.reduce((a, c) => a + c.length, 0) + " folders)" : ""}</span></div>`;
 
@@ -210,7 +216,7 @@ for (const p of P) {
     <rect class="box" x="${q.x}" y="${q.y}" width="${q.w}" height="${BOXH}" rx="6" style="stroke:${color(p.path)}"/>
     <rect x="${q.x}" y="${q.y}" width="5" height="${BOXH}" rx="2" style="fill:${color(p.path)}"/>
     <text x="${q.cx + 2}" y="${q.y + 18}" text-anchor="middle">${esc(label(p.path))}</text>
-    <title>${esc(p.path)}\n${p.files.length} files · ${p.nfn} functions · ${num(p.lines)} lines\nimports ${p.imports.length} · imported by ${p.usedBy.length}</title></g>`;
+    <title>${esc(p.path)}\n${p.nfiles} files · ${p.nfn} functions · ${num(p.lines)} lines\nimports ${p.imports.length} · imported by ${p.usedBy.length}</title></g>`;
 }
 svg.innerHTML = bg + `<g>${edges}</g><g>${nodes}</g>`;
 
@@ -221,12 +227,15 @@ const setZoom = z => { zoom = Math.max(.2, Math.min(3, z)); svg.style.width = wi
 $("zin").onclick = () => setZoom(zoom * 1.25); $("zout").onclick = () => setZoom(zoom / 1.25); $("zfit").onclick = () => setZoom(fit());
 setZoom(Math.max(fit(), .55));
 
-function highlight(p) {
-  const near = new Set(p ? [p, ...byPath[p].imports, ...byPath[p].usedBy] : []);
-  svg.querySelectorAll(".node").forEach(n => { n.classList.toggle("on", n.dataset.p === p); n.classList.toggle("dim", !!p && !near.has(n.dataset.p)); });
+// highlight one folder, or (for a package) the set of folders it spans
+function highlight(p, set) {
+  set ||= p ? new Set([p]) : new Set();
+  const near = new Set(set);
+  for (const x of set) for (const y of [...byPath[x].imports, ...byPath[x].usedBy]) near.add(y);
+  svg.querySelectorAll(".node").forEach(n => { n.classList.toggle("on", set.has(n.dataset.p)); n.classList.toggle("dim", set.size > 0 && !near.has(n.dataset.p)); });
   svg.querySelectorAll(".edge").forEach(e => {
-    const o = e.dataset.f === p, i = e.dataset.t === p;
-    e.classList.toggle("out", o); e.classList.toggle("in", i); e.classList.toggle("dim", !!p && !o && !i);
+    const o = set.has(e.dataset.f) && !set.has(e.dataset.t), i = set.has(e.dataset.t) && !set.has(e.dataset.f), inner = set.has(e.dataset.f) && set.has(e.dataset.t);
+    e.classList.toggle("out", o); e.classList.toggle("in", i); e.classList.toggle("dim", set.size > 0 && !o && !i && !inner);
   });
   if (p) {
     const k = byPath[p], cyc = sccs[sccOf[p]].length > 1;
@@ -234,64 +243,86 @@ function highlight(p) {
       (cyc ? ` · <span class="c">in a cycle with ${sccs[sccOf[p]].length - 1} other folder(s)</span>` : "") + ".";
   }
 }
-svg.addEventListener("click", e => { const n = e.target.closest(".node"); if (n) select(n.dataset.p, true); });
-svg.addEventListener("keydown", e => { const n = e.target.closest(".node"); if (n && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); select(n.dataset.p, true); } });
+svg.addEventListener("click", e => { const n = e.target.closest(".node"); if (n) selectDir(n.dataset.p, true); });
+svg.addEventListener("keydown", e => { const n = e.target.closest(".node"); if (n && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); selectDir(n.dataset.p, true); } });
 
-// ---- browser
-let cur = [...P].sort((a, b) => b.usedBy.length - a.usedBy.length || b.nfn - a.nfn)[0].path, curFile = "", query = "", expOnly = false;
-const maxLen = Math.min(200, Math.max(1, ...P.flatMap(p => p.files.flatMap(f => f.funcs.map(x => x.s)))));
+// ---- browser: packages → files (modules) of the package → functions
+// sel is {pkg: name} from the list, or {dir: folder} from a click on the map
+let sel = {pkg: [...K].sort((a, b) => b.usedBy.length - a.usedBy.length || b.nfn - a.nfn)[0].name}, curFile = "", query = "", expOnly = false;
+const maxLen = Math.min(200, Math.max(1, ...ALLF.flatMap(f => f.funcs.map(x => x.s))));
+const pkgColor = k => color(k.dir === "." ? "." : k.dir);
 const link = (file, line) => {
   const gh = D.source ? `<a href="${esc(D.source + file.rel)}#L${line}" target="_blank" rel="noopener">github</a> · ` : "";
   return gh + `<a href="vscode://file${esc(encodeURI(D.root + "/" + file.rel))}:${line}">open</a>`;
 };
-const fnRow = (f, p, file, where) => `<div class="fn">
-  <div class="sig">${f.r ? `<span class="r">${esc(f.r)}.</span>` : ""}<span class="${f.e ? "x" : ""}">${esc(f.n)}</span>${where ? ` <span class="w">· ${esc(file.rel)}</span>` : ""}</div>
+const fname = f => sel.dir && new Set(curFiles().map(x => x.pk)).size > 1 ? f.pk + " · " + f.name : f.name;
+const curFiles = () => sel.pkg ? byName[sel.pkg].files : ALLF.filter(f => f.g === sel.dir);
+const fnRow = (f, file, where) => `<div class="fn">
+  <div class="sig">${f.r ? `<span class="r">${esc(f.r)}.</span>` : ""}<span class="${f.e ? "x" : ""}">${esc(f.n)}</span>${where ? ` <span class="w">· ${esc(file.pk)} · ${esc(file.name)}</span>` : ""}</div>
   <div class="meta">:${f.l} · ${f.s} lines · ${link(file, f.l)}</div>
   ${f.d ? `<div class="doc">${esc(f.d)}</div>` : ""}
   <div class="bar" style="width:${Math.min(100, Math.max(1, 100 * f.s / maxLen))}%"></div></div>`;
 function renderPkgs() {
-  $("pkgs").innerHTML = `<div class="colhead">Folders, most functions first</div>` + [...P].sort((a, b) => b.nfn - a.nfn).map(p =>
-    `<button class="item${p.path === cur ? " on" : ""}" data-pkg="${esc(p.path)}"><span class="dot" style="background:${color(p.path)}"></span>
-      <span class="n">${esc(p.path)}</span><span class="c">${p.nfn}</span></button>`).join("");
+  const lit = k => sel.pkg ? k.name === sel.pkg : k.dirs.has(sel.dir);
+  $("pkgs").innerHTML = `<div class="colhead">Packages, most functions first</div>` + [...K].sort((a, b) => b.nfn - a.nfn).map(k =>
+    `<button class="item${lit(k) ? " on" : ""}" data-pkg="${esc(k.name)}" title="${esc(k.dir)}"><span class="dot" style="background:${pkgColor(k)}"></span>
+      <span class="n">${esc(k.name)}</span><span class="c">${k.nfn}</span></button>`).join("");
 }
 function renderFiles() {
-  const p = byPath[cur];
-  const list = l => l.length ? l.map(x => `<a data-go="${esc(x)}">${esc(x)}</a>`).join(", ") : "—";
-  $("files").innerHTML = `<div class="colhead">${esc(cur)}</div><div class="pdoc"><b>${esc(cur)}</b>
-    <div>Imports: ${list(p.imports)}</div><div>Imported by: ${list(p.usedBy)}</div>
-    ${p.ext.length ? `<div>Packages: <code>${p.ext.map(esc).join(", ")}</code></div>` : ""}</div>
-    <button class="item${curFile === "" ? " on" : ""}" data-file=""><span class="n">all ${p.files.length} files</span><span class="c">${p.nfn}</span></button>` +
-    p.files.map(f => `<button class="item${f.name === curFile ? " on" : ""}" data-file="${esc(f.name)}"><span class="n">${esc(f.name)}</span><span class="c">${f.funcs.length}</span></button>`).join("");
+  const list = (l, attr) => l.length ? l.map(x => `<a ${attr}="${esc(x)}">${esc(x)}</a>`).join(", ") : "—";
+  const fl = curFiles(), nfn = fl.reduce((a, f) => a + f.funcs.length, 0);
+  let head;
+  if (sel.pkg) {
+    const k = byName[sel.pkg];
+    head = `<div class="colhead">package · ${esc(k.dir)}</div><div class="pdoc"><b>${esc(k.name)}</b>
+      <div>Uses packages: ${list(k.imports, "data-gopkg")}</div><div>Used by: ${list(k.usedBy, "data-gopkg")}</div>
+      ${k.ext.length ? `<details><summary>${k.ext.length} npm dependencies</summary><code>${k.ext.map(esc).join(", ")}</code></details>` : ""}</div>`;
+  } else {
+    const d = byPath[sel.dir], inPk = K.filter(k => k.dirs.has(sel.dir)).map(k => k.name);
+    head = `<div class="colhead">folder on the map</div><div class="pdoc"><b>${esc(sel.dir)}</b>
+      <div>In package: ${list(inPk, "data-gopkg")}</div>
+      <div>Imports folders: ${list(d.imports, "data-go")}</div><div>Imported by: ${list(d.usedBy, "data-go")}</div></div>`;
+  }
+  $("files").innerHTML = head + `<button class="item${curFile === "" ? " on" : ""}" data-file=""><span class="n">all ${fl.length} files</span><span class="c">${nfn}</span></button>` +
+    fl.map(f => `<button class="item${f.rel === curFile ? " on" : ""}" data-file="${esc(f.rel)}" title="${esc(f.rel)}"><span class="n">${esc(fname(f))}</span><span class="c">${f.funcs.length}</span></button>`).join("");
 }
 function renderFns() {
   let out = "", n = 0;
   const ok = f => (!expOnly || f.e) && (!query || (f.n + " " + (f.r || "") + " " + (f.d || "")).toLowerCase().includes(query));
   if (query) {
-    for (const p of P) for (const file of p.files) for (const f of file.funcs) if (ok(f) && n < 300) { out += fnRow(f, p.path, file, true); n++; }
+    for (const file of ALLF) for (const f of file.funcs) if (ok(f) && n < 300) { out += fnRow(f, file, true); n++; }
     $("fns").innerHTML = `<div class="colhead">Matching “${esc(query)}” everywhere${n >= 300 ? " (first 300)" : ""}</div>` + (out || `<div class="empty">No match.</div>`);
     return;
   }
-  for (const file of byPath[cur].files) {
-    if (curFile && file.name !== curFile) continue;
+  for (const file of curFiles()) {
+    if (curFile && file.rel !== curFile) continue;
     const fs = file.funcs.filter(ok); if (!fs.length) continue;
-    if (!curFile) out += `<div class="colhead" style="position:static">${esc(file.name)} · ${num(file.lines)} lines</div>`;
-    out += fs.map(f => fnRow(f, cur, file, false)).join(""); n += fs.length;
+    if (!curFile) out += `<div class="colhead" style="position:static">${esc(fname(file))} · ${num(file.lines)} lines</div>`;
+    out += fs.map(f => fnRow(f, file, false)).join(""); n += fs.length;
   }
   $("fns").innerHTML = (curFile ? `<div class="colhead">${esc(curFile)} · ${n} functions</div>` : "") + (out || `<div class="empty">No functions here${expOnly ? " that are exported" : ""}.</div>`);
 }
-function select(p, fromMap) {
-  cur = p; curFile = ""; renderPkgs(); renderFiles(); renderFns(); highlight(p); $("files").scrollTop = 0;
-  if (!fromMap) { const n = svg.querySelector(`.node[data-p="${CSS.escape(p)}"]`); n?.scrollIntoView({block: "nearest", inline: "center", behavior: "smooth"}); }
+const renderAll = () => { renderPkgs(); renderFiles(); renderFns(); $("files").scrollTop = 0; $("fns").scrollTop = 0; };
+function selectPkg(name) {
+  sel = {pkg: name}; curFile = ""; renderAll();
+  const k = byName[name];
+  highlight(null, k.dirs);
+  $("hint").innerHTML = `Package <b>${esc(name)}</b> spans ${k.dirs.size} folder(s) on the map; <span class="o">orange</span> lines leave it, <span class="i">blue</span> lines come in.`;
 }
-$("pkgs").addEventListener("click", e => { const b = e.target.closest("[data-pkg]"); if (b) select(b.dataset.pkg); });
+function selectDir(p, fromMap) {
+  sel = {dir: p}; curFile = ""; renderAll(); highlight(p);
+  if (!fromMap) svg.querySelector(`.node[data-p="${CSS.escape(p)}"]`)?.scrollIntoView({block: "nearest", inline: "center", behavior: "smooth"});
+}
+$("pkgs").addEventListener("click", e => { const b = e.target.closest("[data-pkg]"); if (b) selectPkg(b.dataset.pkg); });
 $("files").addEventListener("click", e => {
-  const g = e.target.closest("[data-go]"); if (g) return select(g.dataset.go);
+  const g = e.target.closest("[data-go]"); if (g) return selectDir(g.dataset.go);
+  const k = e.target.closest("[data-gopkg]"); if (k) return selectPkg(k.dataset.gopkg);
   const b = e.target.closest("[data-file]"); if (b) { curFile = b.dataset.file; renderFiles(); renderFns(); }
 });
 $("q").addEventListener("input", e => { query = e.target.value.trim().toLowerCase(); renderFns(); });
 $("exported").addEventListener("change", e => { expOnly = e.target.checked; renderFns(); });
-$("foot").textContent = `${D.rev ? "Commit " + D.rev + ". " : ""}Bold = exported. Type-only imports and tests are left out. “open” jumps to the line in VS Code${D.source ? "; “github” opens it on GitHub" : ""}.`;
-select(cur, true);
+$("foot").textContent = `${D.rev ? "Commit " + D.rev + ". " : ""}Packages are folders with a package.json or project.json (Nx). Bold = exported. Type-only imports and tests are left out. “open” jumps to the line in VS Code${D.source ? "; “github” opens it on GitHub" : ""}.`;
+selectPkg(sel.pkg);
 </script>
 </body>
 </html>

@@ -110,6 +110,33 @@ const pkgName = s => s.startsWith("node:") ? s : s.startsWith("@") ? s.split("/"
 // ---------- grouping
 const relDir = f => { const d = path.relative(ROOT, path.dirname(f)).split(path.sep).join("/"); return d || "."; };
 const group = f => { const d = relDir(f); return opt.depth > 0 && d !== "." ? d.split("/").slice(0, opt.depth).join("/") : d; };
+const rel = f => path.relative(ROOT, f).split(path.sep).join("/") || ".";
+
+// ---------- packages: nearest folder with package.json (npm/yarn/pnpm workspaces) or project.json (Nx)
+const pkgCache = new Map();
+const packages = new Map(); // dir -> {name, dir, files, imports:Set, ext:Set, cnt}
+function packageOf(file) {
+  let dir = path.dirname(file);
+  const seen = [];
+  let found = null;
+  while (true) {
+    if (pkgCache.has(dir)) { found = pkgCache.get(dir); break; }
+    seen.push(dir);
+    let name = null;
+    for (const m of ["package.json", "project.json"]) {
+      const f = path.join(dir, m);
+      if (fs.existsSync(f)) { try { name = JSON.parse(fs.readFileSync(f, "utf8")).name || null; } catch {} name ||= path.basename(dir); break; }
+    }
+    if (name || dir === ROOT || dir === path.dirname(dir)) {
+      found = dir;
+      if (!packages.has(dir)) packages.set(dir, { name: name || path.basename(ROOT), dir: rel(dir), files: [], imports: new Set(), ext: new Set(), cnt: {} });
+      break;
+    }
+    dir = path.dirname(dir);
+  }
+  for (const s of seen) pkgCache.set(s, found);
+  return packages.get(found);
+}
 
 // ---------- parse
 const firstSentence = s => {
@@ -135,7 +162,7 @@ for (const file of files) {
   const sf = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true, kind);
   const lineOf = pos => sf.getLineAndCharacterOfPosition(pos).line + 1;
   const g = group(file);
-  if (!groups.has(g)) groups.set(g, { path: g, files: [], imports: new Set(), ext: new Set(), cnt: {} });
+  if (!groups.has(g)) groups.set(g, { path: g, imports: new Set(), ext: new Set(), cnt: {} });
   const G = groups.get(g);
 
   const specs = [];
@@ -194,21 +221,30 @@ for (const file of files) {
     ts.forEachChild(n, visit);
   })(sf);
 
+  const PK = packageOf(file);
   for (const s of specs) {
     const r = resolve(s, file);
-    if (r?.internal) { const t = group(r.internal); if (t !== g) { G.imports.add(t); G.cnt[t] = (G.cnt[t] || 0) + 1; } }
-    else if (r?.external) G.ext.add(r.external);
+    if (r?.internal) {
+      const t = group(r.internal); if (t !== g) { G.imports.add(t); G.cnt[t] = (G.cnt[t] || 0) + 1; }
+      const tp = packageOf(r.internal); if (tp !== PK) { PK.imports.add(tp.name); PK.cnt[tp.name] = (PK.cnt[tp.name] || 0) + 1; }
+    } else if (r?.external) { G.ext.add(r.external); PK.ext.add(r.external); }
   }
   const lines = sf.getLineStarts().length;
   totalLines += lines;
-  const name = opt.depth > 0 ? path.relative(path.join(ROOT, g), file).split(path.sep).join("/") : path.basename(file);
-  G.files.push({ name, rel: path.relative(ROOT, file).split(path.sep).join("/"), lines, funcs });
+  G.nfiles = (G.nfiles || 0) + 1; G.lines = (G.lines || 0) + lines; G.nfn = (G.nfn || 0) + funcs.length;
+  // name = module path inside its package
+  const pdir = PK.dir === "." ? ROOT : path.join(ROOT, PK.dir);
+  PK.files.push({ name: path.relative(pdir, file).split(path.sep).join("/"), rel: rel(file), g, lines, funcs });
 }
 
 // ---------- output
+// folders drive the map; packages drive the browser (files live under their package)
 const pkgs = [...groups.values()].sort((a, b) => a.path.localeCompare(b.path)).map(g => ({
-  path: g.path, imports: [...g.imports].sort(), weights: g.cnt, ext: [...g.ext].sort(),
-  files: g.files.sort((a, b) => a.name.localeCompare(b.name)),
+  path: g.path, imports: [...g.imports].sort(), weights: g.cnt, ext: [...g.ext].sort(), nfiles: g.nfiles, lines: g.lines, nfn: g.nfn,
+}));
+const modules = [...packages.values()].sort((a, b) => a.name.localeCompare(b.name)).map(p => ({
+  name: p.name, dir: p.dir, imports: [...p.imports].sort(), weights: p.cnt, ext: [...p.ext].sort(),
+  files: p.files.sort((a, b) => a.name.localeCompare(b.name)),
 }));
 
 let name = path.basename(ROOT), rev = "", source = "";
@@ -221,12 +257,12 @@ try {
   if (m) source = `https://github.com/${m[1]}/${m[2]}/blob/${git("rev-parse", "HEAD")}/${git("rev-parse", "--show-prefix")}`;
 } catch {}
 
-const data = { name, root: ROOT, rev, source, depth: opt.depth, lines: totalLines, pkgs };
+const data = { name, root: ROOT, rev, source, depth: opt.depth, lines: totalLines, pkgs, packages: modules };
 const tpl = fs.readFileSync(path.join(HERE, "template.html"), "utf8");
 const json = JSON.stringify(data).replace(/</g, "\\u003c");
 const esc = s => s.replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 fs.writeFileSync(OUT, tpl.replaceAll("{{NAME}}", esc(name)).replace("/*{{DATA}}*/", () => json));
-const nfn = pkgs.reduce((a, p) => a + p.files.reduce((b, f) => b + f.funcs.length, 0), 0);
-console.log(`wrote ${OUT}: ${pkgs.length} folders, ${files.length} files, ${nfn} functions, ${totalLines} lines`);
+const nfn = pkgs.reduce((a, p) => a + p.nfn, 0);
+console.log(`wrote ${OUT}: ${modules.length} packages, ${pkgs.length} folders, ${files.length} files, ${nfn} functions, ${totalLines} lines`);
 if (pkgs.length > 60 && !opt.depth) console.log(`tip: ${pkgs.length} folders is a lot to draw; try --depth 2, 3 or 4 to group them`);
 if (opt.open && process.stdout.isTTY) spawn(process.platform === "darwin" ? "open" : "xdg-open", [OUT], { detached: true, stdio: "ignore" }).unref();
